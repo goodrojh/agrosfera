@@ -51,16 +51,17 @@ function useChangeFlash(signature: string): number {
 const buyersText = (b: BuyerType[]) =>
   b.length === 2 ? "экспортёры и агенты" : b.length === 1 ? BUYER_LABEL[b[0]] : "";
 
-const BidRow = memo(function BidRow({ l, max, onClick }: { l: Level; max: number; onClick: () => void }) {
+const BidRow = memo(function BidRow({ l, max, onClick }: { l: Level; max: number; onClick?: () => void }) {
   const flash = useChangeFlash(`${l.volume}-${l.count}`);
   const who = buyersText(l.buyers);
   return (
     <button
       onClick={onClick}
-      className="group relative w-full h-7 flex items-center justify-between gap-2 px-3 rounded-md hover:bg-gray-50 transition-colors"
+      disabled={!onClick}
+      className={"group relative w-full h-7 flex items-center justify-between gap-2 px-3 rounded-md transition-colors " + (onClick ? "hover:bg-gray-50" : "cursor-default")}
       title={`${who ? who[0].toUpperCase() + who.slice(1) + " · " : ""}${
         l.regions.length ? `готовы брать: ${l.regions.map(shortRegionName).join(", ")}` : "из любого региона"
-      } · предприятию: нажмите, чтобы продать по этой цене`}
+      }${onClick ? " · нажмите, чтобы продать по этой цене" : ""}`}
     >
       {flash > 0 && <span key={flash} className="agr-flash absolute inset-0 rounded-md" />}
       <span
@@ -76,20 +77,21 @@ const BidRow = memo(function BidRow({ l, max, onClick }: { l: Level; max: number
         )}
       </span>
       <span className="relative flex items-center gap-1.5 shrink-0">
-        <span className="hidden group-hover:inline text-[10px] font-semibold text-[#2f7a1f] border border-[#2f7a1f]/30 bg-white rounded px-1">продать</span>
+        {onClick && <span className="hidden group-hover:inline text-[10px] font-semibold text-[#2f7a1f] border border-[#2f7a1f]/30 bg-white rounded px-1">продать</span>}
         <span className="text-sm font-bold tabular-nums text-[#2f7a1f]">{rub(l.price)}</span>
       </span>
     </button>
   );
 });
 
-const AskRow = memo(function AskRow({ l, max, onClick }: { l: Level; max: number; onClick: () => void }) {
+const AskRow = memo(function AskRow({ l, max, onClick }: { l: Level; max: number; onClick?: () => void }) {
   const flash = useChangeFlash(`${l.volume}-${l.count}`);
   return (
     <button
       onClick={onClick}
-      className="group relative w-full h-7 flex items-center justify-between gap-2 px-3 rounded-md hover:bg-gray-50 transition-colors"
-      title={`Предприятия: ${l.regions.map(shortRegionName).join(", ")} · экспортёру и агенту: нажмите, чтобы купить по этой цене`}
+      disabled={!onClick}
+      className={"group relative w-full h-7 flex items-center justify-between gap-2 px-3 rounded-md transition-colors " + (onClick ? "hover:bg-gray-50" : "cursor-default")}
+      title={`Предприятия: ${l.regions.map(shortRegionName).join(", ")}${onClick ? " · нажмите, чтобы купить по этой цене" : ""}`}
     >
       {flash > 0 && <span key={flash} className="agr-flash-ask absolute inset-0 rounded-md" />}
       <span
@@ -98,10 +100,10 @@ const AskRow = memo(function AskRow({ l, max, onClick }: { l: Level; max: number
       />
       <span className="relative flex items-center gap-1.5 shrink-0">
         <span className="text-sm font-bold tabular-nums text-[#c0492f]">{rub(l.price)}</span>
-        <span className="hidden group-hover:inline text-[10px] font-semibold text-[#c0492f] border border-[#c0492f]/30 bg-white rounded px-1">купить</span>
+        {onClick && <span className="hidden group-hover:inline text-[10px] font-semibold text-[#c0492f] border border-[#c0492f]/30 bg-white rounded px-1">купить</span>}
       </span>
       <span className="relative flex items-center gap-1.5 min-w-0 text-[13px] tabular-nums text-gray-600">
-        <span className="hidden sm:inline group-hover:!hidden text-[11px] text-gray-400 truncate">
+        <span className={"hidden sm:inline text-[11px] text-gray-400 truncate " + (onClick ? "group-hover:!hidden" : "")}>
           {l.count > 1 ? `${l.count} предпр.` : shortRegionName(l.regions[0])}
         </span>
         <span className="shrink-0">{rub(l.volume)} т</span>
@@ -121,10 +123,10 @@ export default function OrderBook({
 }: {
   asks: Quote[];
   bids: Bid[];
-  /** Экспортёр/агент: купить по цене предприятия */
-  onBuyAt: (price: number, volume: number) => void;
-  /** Предприятие: продать по цене покупателя */
-  onSellAt: (price: number, volume: number) => void;
+  /** Экспортёр/агент: купить по цене предприятия. Нет — цены предприятий не кликабельны */
+  onBuyAt?: (price: number, volume: number) => void;
+  /** Предприятие: продать по цене покупателя. Нет — заявки покупателей не кликабельны */
+  onSellAt?: (price: number, volume: number) => void;
 }) {
   const askLevels = useMemo(() => aggregate(asks.map((q) => ({ price: q.price, volume: q.volume, regions: [q.regionId] })), false), [asks]);
   const bidLevels = useMemo(() => aggregate(bids, true), [bids]);
@@ -175,7 +177,7 @@ export default function OrderBook({
             <span>Цена, ₽/т</span>
           </div>
           {topBids.map((l) => (
-            <BidRow key={l.price} l={l} max={max} onClick={() => onSellAt(l.price, l.volume)} />
+            <BidRow key={l.price} l={l} max={max} onClick={onSellAt && (() => onSellAt(l.price, l.volume))} />
           ))}
           {Array.from({ length: ROWS - topBids.length }, (_, i) => (
             <Empty key={i} />
@@ -189,7 +191,7 @@ export default function OrderBook({
             </span>
           </div>
           {topAsks.map((l) => (
-            <AskRow key={l.price} l={l} max={max} onClick={() => onBuyAt(l.price, l.volume)} />
+            <AskRow key={l.price} l={l} max={max} onClick={onBuyAt && (() => onBuyAt(l.price, l.volume))} />
           ))}
           {Array.from({ length: ROWS - topAsks.length }, (_, i) => (
             <Empty key={i} />

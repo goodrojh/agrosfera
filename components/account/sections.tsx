@@ -1,76 +1,31 @@
 "use client";
 
 import React, { useState } from "react";
-import { Check, Clock, LogOut, Send, ShieldAlert, X } from "lucide-react";
-import { api, logout, ROLE_LABEL, type Account, type MatchStatus } from "@/lib/account";
-import { asset, TELEGRAM_BOT_URL } from "@/lib/config";
+import { Check, Clock, Send, X } from "lucide-react";
+import { api, type Account, type MatchStatus } from "@/lib/account";
+import { TELEGRAM_BOT_URL } from "@/lib/config";
 import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
 import { REGION_BY_ID } from "@/lib/market/regions";
 import { rub, time, dateShort } from "@/lib/market/format";
 import { field } from "./AuthForm";
 
-const card = "rounded-2xl border border-gray-200 bg-white p-5 md:p-6";
+export const card = "rounded-2xl border border-gray-200 bg-white p-5 md:p-6";
 const digits = (v: string) => v.replace(/\D/g, "").slice(0, 6);
 
-export default function Cabinet({ account }: { account: Account }) {
-  const buyer = account.role !== "producer";
-  return (
-    <div className="max-w-5xl mx-auto">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-gray-500">
-            {ROLE_LABEL[account.role]} · {account.code}
-          </p>
-          <h1 className="text-2xl md:text-3xl font-semibold text-gray-900 tracking-tight">{account.name}</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            {REGION_BY_ID[account.regionId]?.name} · {account.email}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <a href={asset("/#terminal")} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
-            Открыть котировки
-          </a>
-          <button onClick={() => void logout()} className="rounded-xl px-3 py-2.5 text-sm text-gray-500 hover:text-gray-900 hover:bg-gray-50 inline-flex items-center gap-1.5">
-            <LogOut size={15} /> Выйти
-          </button>
-        </div>
-      </div>
-
-      {account.status === "new" && <Pending account={account} />}
-      {account.status === "blocked" && (
-        <div className={card + " mt-6 flex gap-3"}>
-          <ShieldAlert className="text-[#c0492f] shrink-0" />
-          <p className="text-gray-700">Доступ закрыт. Свяжитесь с менеджером АгроСферы.</p>
-        </div>
-      )}
-      {account.status === "active" && (
-        <div className="mt-6 grid lg:grid-cols-[1fr_340px] gap-5 items-start">
-          <div className="space-y-5">{buyer ? <BuyerBids account={account} /> : <ProducerPrices account={account} />}</div>
-          <div className="space-y-5">
-            <Matches account={account} />
-            {!buyer && <BotCard account={account} />}
-            <PasswordCard />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Pending({ account }: { account: Account }) {
+export function Pending({ account }: { account: Account }) {
   const steps = [
     ["Анкета отправлена", true],
     ["Менеджер звонит и проверяет компанию", false],
     [account.role === "producer" ? "Открываем доступ: подаёте цены на сайте и в боте" : "Открываем доступ: ставите заявки и покупаете по ценам предприятий", false],
   ] as const;
   return (
-    <div className={card + " mt-6"}>
+    <div className={card}>
       <div className="flex items-center gap-2 text-[#9a6b00]">
         <Clock size={18} />
         <p className="font-semibold">Анкета на проверке</p>
       </div>
       <p className="mt-2 text-gray-600">
-        Обычно проверка занимает до одного рабочего дня. Менеджер позвонит по номеру {account.phone}. Пока можно смотреть котировки на главной.
+        Обычно проверка занимает до одного рабочего дня. Менеджер позвонит по номеру {account.phone}. Пока можно смотреть котировки в разделе «Терминал».
       </p>
       <ol className="mt-5 space-y-3">
         {steps.map(([t, done], i) => (
@@ -88,7 +43,7 @@ function Pending({ account }: { account: Account }) {
 
 // ── Предприятие: цены по закреплённым культурам ──
 
-function ProducerPrices({ account }: { account: Account }) {
+export function ProducerPrices({ account }: { account: Account }) {
   return (
     <div className={card}>
       <h2 className="text-lg font-semibold text-gray-900">Мои цены сегодня</h2>
@@ -178,7 +133,7 @@ function PriceRow({ crop, current }: { crop: CropId; current?: Account["quotesTo
   );
 }
 
-function BotCard({ account }: { account: Account }) {
+export function BotCard({ account }: { account: Account }) {
   const link = account.botLink ?? TELEGRAM_BOT_URL;
   return (
     <div className={card}>
@@ -203,7 +158,7 @@ function BotCard({ account }: { account: Account }) {
 
 const BID_STATUS = { pending: "на проверке", active: "в стакане", removed: "снята" } as const;
 
-function BuyerBids({ account }: { account: Account }) {
+export function BuyerBids({ account }: { account: Account }) {
   const [crop, setCrop] = useState<CropId>("flax");
   const [price, setPrice] = useState("");
   const [volume, setVolume] = useState("");
@@ -303,7 +258,7 @@ function BuyerBids({ account }: { account: Account }) {
 
 const MATCH_STATUS: Record<MatchStatus, string> = { new: "новое", working: "менеджер ведёт сделку", done: "сделка проведена", rejected: "не состоялась" };
 
-function Matches({ account }: { account: Account }) {
+export function Matches({ account }: { account: Account }) {
   return (
     <div className={card}>
       <h3 className="font-semibold text-gray-900">Совпадения</h3>
@@ -332,17 +287,10 @@ function Matches({ account }: { account: Account }) {
   );
 }
 
-function PasswordCard() {
-  const [open, setOpen] = useState(false);
+export function PasswordCard() {
   const [old, setOld] = useState("");
   const [pwd, setPwd] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  if (!open)
-    return (
-      <button onClick={() => setOpen(true)} className="text-sm text-gray-500 hover:text-gray-900 px-1">
-        Сменить пароль
-      </button>
-    );
   return (
     <form
       className={card}

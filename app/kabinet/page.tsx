@@ -1,52 +1,61 @@
 "use client";
 
 import React from "react";
+import { ArrowLeft, Check } from "lucide-react";
 import { cabinetAvailable, useAccount } from "@/lib/account";
 import { asset } from "@/lib/config";
 import AuthForm from "@/components/account/AuthForm";
-import Cabinet from "@/components/account/Cabinet";
+import CabinetApp from "@/components/account/CabinetApp";
+
+const POINTS = [
+  "Предприятие — подаёт цены на сайте и в боте, продаёт покупателям из стакана",
+  "Экспортёр и агент — ставят заявки и покупают по ценам предприятий",
+  "Сделки проводит АгроСфера: проверяем стороны, выкуп и доставка",
+];
 
 export default function CabinetPage() {
   const { loading, account } = useAccount();
-  return (
-    <main className="min-h-screen bg-[#f7f8f6]">
-      <header className="bg-white border-b border-gray-200 px-4 md:px-8">
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-4 py-3">
-          <a href={asset("/")} className="flex items-center gap-2.5">
-            <img src={asset("/brand/emblem.png")} alt="" className="h-8 w-8 rounded-full" />
-            <span className="font-semibold tracking-[0.14em] text-sm text-gray-900">АГРОСФЕРА</span>
-          </a>
-          <nav className="flex items-center gap-5 text-sm text-gray-600">
-            <a href={asset("/#terminal")} className="hover:text-gray-900">
-              Котировки
-            </a>
-            <a href={asset("/sotrudnichestvo/")} className="hover:text-gray-900 hidden sm:inline">
-              Сотрудничество
-            </a>
-          </nav>
-        </div>
-      </header>
 
-      <div className="px-4 md:px-8 py-8 md:py-12">
+  if (cabinetAvailable && !loading && account) return <CabinetApp account={account} />;
+
+  return (
+    <main className="min-h-screen bg-[#f4f6f2] lg:grid lg:grid-cols-[minmax(360px,5fr)_7fr]">
+      {/* Левая панель — бренд и что даёт кабинет */}
+      <aside className="bg-[#0b1f0e] text-white px-6 md:px-10 py-6 lg:py-10 flex flex-col">
+        <a href={asset("/")} className="inline-flex items-center gap-2 text-sm text-white/50 hover:text-white w-fit">
+          <ArrowLeft size={15} /> На сайт
+        </a>
+        <div className="mt-6 lg:mt-auto flex items-center gap-3">
+          <img src={asset("/brand/emblem.png")} alt="" className="h-11 w-11 rounded-full ring-1 ring-white/20" />
+          <div>
+            <p className="font-semibold tracking-[0.14em]">АГРОСФЕРА</p>
+            <p className="text-xs text-white/50">личный кабинет участника</p>
+          </div>
+        </div>
+        <h1 className="mt-6 text-[26px] md:text-[34px] font-semibold leading-tight tracking-tight max-w-md">Рабочее место для торговли агрокультурами</h1>
+        <ul className="mt-6 space-y-3 max-w-md hidden sm:block">
+          {POINTS.map((p) => (
+            <li key={p} className="flex gap-3 text-[15px] text-white/75">
+              <Check size={18} className="text-[#8CC152] shrink-0 mt-0.5" />
+              {p}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-8 lg:mt-auto text-xs text-white/35 hidden lg:block">Доступ открывается после проверки компании менеджером.</p>
+      </aside>
+
+      <section className="px-4 md:px-10 py-8 lg:py-16 flex items-start lg:items-center justify-center">
         {!cabinetAvailable ? (
-          <div className="max-w-lg mx-auto rounded-2xl border border-gray-200 bg-white p-6 text-center">
+          <div className="max-w-lg w-full rounded-2xl border border-gray-200 bg-white p-6 text-center">
             <p className="text-lg font-semibold text-gray-900">Личный кабинет скоро откроется</p>
             <p className="mt-2 text-sm text-gray-600">Сейчас сайт работает в демо-режиме. Кабинет заработает, как только подключим сервер АгроСферы.</p>
           </div>
         ) : loading ? (
           <div className="h-60" />
-        ) : account ? (
-          <Cabinet account={account} />
         ) : (
-          <>
-            <div className="max-w-lg mx-auto text-center mb-6">
-              <h1 className="text-2xl md:text-3xl font-semibold text-gray-900 tracking-tight">Личный кабинет</h1>
-              <p className="mt-2 text-gray-600">Подавайте цены, ставьте заявки и покупайте через АгроСферу — после проверки компании.</p>
-            </div>
-            <AuthForm />
-          </>
+          <AuthForm />
         )}
-      </div>
+      </section>
     </main>
   );
 }
