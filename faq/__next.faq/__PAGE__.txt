@@ -1,0 +1,26 @@
+1:"$Sreact.fragment"
+2:I[18013,["/agrosfera/_next/static/chunks/0h2qsuyze9ds1.js","/agrosfera/_next/static/chunks/1ech5ic_ckze1.js"],"default"]
+3:I[18013,["/agrosfera/_next/static/chunks/0h2qsuyze9ds1.js","/agrosfera/_next/static/chunks/1ech5ic_ckze1.js"],"PageIntro"]
+4:I[23462,["/agrosfera/_next/static/chunks/0h2qsuyze9ds1.js","/agrosfera/_next/static/chunks/1ech5ic_ckze1.js"],"default"]
+5:I[24561,["/agrosfera/_next/static/chunks/0h2qsuyze9ds1.js","/agrosfera/_next/static/chunks/1ech5ic_ckze1.js"],"default"]
+6:I[97367,["/agrosfera/_next/static/chunks/0h2qsuyze9ds1.js"],"OutletBoundary"]
+7:"$Sreact.suspense"
+b:I[97367,["/agrosfera/_next/static/chunks/0h2qsuyze9ds1.js"],"ViewportBoundary"]
+c:I[97367,["/agrosfera/_next/static/chunks/0h2qsuyze9ds1.js"],"MetadataBoundary"]
+d:I[27201,["/agrosfera/_next/static/chunks/0h2qsuyze9ds1.js"],"IconMark"]
+f:I[39756,["/agrosfera/_next/static/chunks/0h2qsuyze9ds1.js"],"default"]
+10:I[37457,["/agrosfera/_next/static/chunks/0h2qsuyze9ds1.js"],"default"]
+:HL["/agrosfera/_next/static/chunks/03mbc7nfypjsw.css","style"]
+a:X
+12:X
+12:C
+0:{"buildId":"GVf9MFl7FUIU9-uuTgWmq","data":[{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"min-h-screen bg-white","children":[["$","$L2",null,{"active":"faq"}],["$","$L3",null,{"title":"Вопросы и ответы","lead":"Коротко о котировках, участии и сделках."}],["$","$L4",null,{}],["$","$L5",null,{"withForm":false}]]}],[["$","script","script-0",{"src":"/agrosfera/_next/static/chunks/1ech5ic_ckze1.js","async":true}]],["$","$L6",null,{"children":["$","$7",null,{"name":"Next.MetadataOutlet","children":"$@8"}]}]]}],"isPartial":"$@9","staleTime":"$a","varyParams":null},{"rsc":["$","$1","h",{"children":[null,["$","$Lb",null,{"children":[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"}],["$","meta","2",{"name":"theme-color","content":"#07160a"}]]}],["$","div",null,{"hidden":true,"children":["$","$Lc",null,{"children":["$","$7",null,{"name":"Next.Metadata","children":[["$","title","0",{"children":"Вопросы и ответы — АгроСфера"}],["$","meta","1",{"name":"description","content":"Откуда берутся цены, как стать участником и как проходит сделка."}],["$","link","2",{"rel":"icon","href":"/agrosfera/icon.png?icon.00v44rl83sezy.png","sizes":"64x64","type":"image/png"}],["$","link","3",{"rel":"apple-touch-icon","href":"/agrosfera/apple-icon.png?apple-icon.1d0u2k6sa3_a0.png","sizes":"180x180","type":"image/png"}],["$","$Ld","4",{}]]}]}]}],["$","meta",null,{"name":"next-size-adjust","content":""}]]}],"isPartial":"$@e","staleTime":"$a","varyParams":null},{"rsc":["$","$1","c",{"children":[null,["$","$Lf",null,{"parallelRouterKey":"children","template":["$","$L10",null,{}]}]]}],"isPartial":"$@11","staleTime":"$a","varyParams":"$12"},{"rsc":["$","$1","c",{"children":[[["$","link","0",{"rel":"stylesheet","href":"/agrosfera/_next/static/chunks/03mbc7nfypjsw.css","precedence":"next"}],["$","script","script-0",{"src":"/agrosfera/_next/static/chunks/0h2qsuyze9ds1.js","async":true}]],["$","html",null,{"lang":"ru","className":"inter_ed26c892-module__0Hd1FG__variable jetbrains_mono_a87e994d-module__OiBWeG__variable","children":["$","body",null,{"children":["$","$Lf",null,{"parallelRouterKey":"children","template":["$","$L10",null,{}],"notFound":[[["$","title",null,{"children":"404: This page could not be found."}],["$","div",null,{"style":{"fontFamily":"system-ui,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif,\"Apple Color Emoji\",\"Segoe UI Emoji\"","height":"100vh","textAlign":"center","display":"flex","flexDirection":"column","alignItems":"center","justifyContent":"center"},"children":["$","div",null,{"children":[["$","style",null,{"dangerouslySetInnerHTML":{"__html":"body{color:#000;background:#fff;margin:0}.next-error-h1{border-right:1px solid rgba(0,0,0,.3)}@media (prefers-color-scheme:dark){body{color:#fff;background:#000}.next-error-h1{border-right:1px solid rgba(255,255,255,.3)}}"}}],["$","h1",null,{"className":"next-error-h1","style":{"display":"inline-block","margin":"0 20px 0 0","padding":"0 23px 0 0","fontSize":24,"fontWeight":500,"verticalAlign":"top","lineHeight":"49px"},"children":404}],["$","div",null,{"style":{"display":"inline-block"},"children":["$","h2",null,{"style":{"fontSize":14,"fontWeight":400,"lineHeight":"49px","margin":0},"children":"This page could not be found."}]}]]}]}]],[]]}]}]}]]}],"isPartial":"$@13","staleTime":"$a","varyParams":null}],"isUpgradeableISRFallback":false,"a":"$@14","rootVaryParams":null,"needsRuntimeRequest":"$@15"}
+8:null
+a:300
+15:true
+a:C
+14:0
+e:"$undefined"
+11:"$undefined"
+13:"$undefined"
+9:"$undefined"
