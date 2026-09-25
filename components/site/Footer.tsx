@@ -32,6 +32,8 @@ export default function Footer({ className, withForm = true }: { className?: str
     comment: "",
   });
   const [state, setState] = useState<"idle" | "sending" | "done" | "error">("idle");
+  // ИНН, который пользователь подтвердил, несмотря на несовпадение контрольной суммы
+  const [innConfirmed, setInnConfirmed] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -53,7 +55,15 @@ export default function Footer({ className, withForm = true }: { className?: str
 
   const submitProducer = async () => {
     if (prod.name.trim().length < 3) return setError("Укажите название предприятия.");
-    if (!isValidInn(prod.inn)) return setError("ИНН не проходит проверку контрольной суммы — проверьте цифры.");
+    // ИНН необязателен: если указан — проверяем, если нет — менеджер уточнит при звонке
+    const len = prod.inn.length;
+    if (len === 13 || len === 15) return setError("Похоже, это ОГРН. Нужен ИНН: 10 цифр для организации или 12 — для ИП и КФХ. Можно оставить поле пустым.");
+    if (len > 0 && len !== 10 && len !== 12) return setError(`ИНН — 10 цифр для организации или 12 для ИП и КФХ (сейчас цифр: ${len}). Если ИНН нет — оставьте поле пустым.`);
+    // Контрольная сумма не сошлась: предупреждаем, но не блокируем — анкету всё равно проверяет менеджер
+    if (len > 0 && !isValidInn(prod.inn) && innConfirmed !== prod.inn) {
+      setInnConfirmed(prod.inn);
+      return setError("ИНН не прошёл проверку контрольной суммы — проверьте цифры. Если всё верно, нажмите «Отправить анкету» ещё раз: менеджер проверит вручную.");
+    }
     if (prod.person.trim().length < 3) return setError("Укажите контактное лицо.");
     if (prod.phone.replace(/\D/g, "").length < 10) return setError("Укажите телефон — по нему бот узнает вас после подтверждения.");
     setError("");
@@ -178,10 +188,10 @@ export default function Footer({ className, withForm = true }: { className?: str
                       <input className={inputCls} placeholder="Название предприятия" value={prod.name} onChange={(e) => setProd((p) => ({ ...p, name: e.target.value }))} />
                       <input
                         className={inputCls}
-                        placeholder="ИНН (10 или 12 цифр)"
+                        placeholder="ИНН (если есть)"
                         inputMode="numeric"
                         value={prod.inn}
-                        onChange={(e) => setProd((p) => ({ ...p, inn: e.target.value.replace(/\D/g, "").slice(0, 12) }))}
+                        onChange={(e) => setProd((p) => ({ ...p, inn: e.target.value.replace(/\D/g, "").slice(0, 15) }))}
                       />
                       <select className={inputCls} value={prod.regionId} onChange={(e) => setProd((p) => ({ ...p, regionId: e.target.value as RegionId }))}>
                         {REGIONS.map((r) => (

@@ -208,7 +208,7 @@ $("#tabs").addEventListener("click", (e) => {
 function companyRow(c) {
   const bot = c.members.length ? `<span class="badge b-active">✓ подключён</span>` : `<span class="sub">не подключён</span>`;
   return `<tr class="click" data-open="${c.id}">
-    <td><b>${esc(c.name)}</b><div class="sub">${esc(c.code)} · ИНН ${esc(c.inn || "—")}</div></td>
+    <td><b>${esc(c.name)}</b><div class="sub">${esc(c.code)} · ${c.inn ? "ИНН " + esc(c.inn) : '<span style="color:var(--red)">ИНН не указан</span>'}</div></td>
     <td class="hide-sm">${esc(regionName(c.regionId))}</td>
     <td>${c.crops.map((x) => `<span class="chip">${esc(cropName(x))}</span>`).join("") || '<span class="sub">не закреплены</span>'}</td>
     <td class="hide-sm">${esc(c.person || "")}<div class="sub">${esc(c.phone || "")}</div></td>

@@ -171,7 +171,7 @@ export function startApi() {
         if (!allow(clientIp(req))) return json(res, 429, { error: "Слишком много заявок, попробуйте позже" });
         const b = await readJson(req);
         const name = clip(b.name, 160);
-        const inn = clip(b.inn, 12).replace(/\s/g, "");
+        const inn = clip(b.inn, 20).replace(/\D/g, "");
         const regionId = String(b.regionId ?? "");
         const crops = Array.isArray(b.crops) ? (b.crops.filter(isCrop) as CropId[]) : [];
         const person = clip(b.person, 160);
@@ -179,30 +179,32 @@ export function startApi() {
         const telegram = clip(b.telegram, 60);
         const comment = clip(b.comment, 1000);
         if (name.length < 3) return json(res, 400, { error: "Укажите название предприятия" });
-        if (!isValidInn(inn)) return json(res, 400, { error: "ИНН не проходит проверку. Проверьте цифры" });
+        // ИНН необязателен (менеджер уточнит при звонке), но если указан — только 10 или 12 цифр
+        if (inn && inn.length !== 10 && inn.length !== 12) return json(res, 400, { error: "ИНН — 10 или 12 цифр. Если ИНН нет, оставьте поле пустым" });
         if (!isRegionId(regionId)) return json(res, 400, { error: "Выберите регион" });
         if (person.length < 3) return json(res, 400, { error: "Укажите контактное лицо" });
         if (phone.replace(/\D/g, "").length < 10) return json(res, 400, { error: "Укажите телефон — по нему бот узнает вас" });
 
-        const existing = companies.byInn(inn);
+        const existing = inn ? companies.byInn(inn) : undefined;
         const stamp = new Date().toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
+        const innNote = !inn ? "⚠️ ИНН не указан — уточнить при звонке." : !isValidInn(inn) ? "⚠️ ИНН не прошёл проверку контрольной суммы — проверить вручную." : "";
         if (existing) {
           companies.update(existing.id, { notes: `${existing.notes}\n[${stamp}] Повторная анкета с сайта: ${person}, ${phone}. ${comment}`.trim() });
         } else {
           companies.create({
             name,
-            inn,
+            inn: inn || undefined,
             regionId,
             status: "new",
             crops,
             person,
             phone,
             telegram,
-            notes: comment ? `[${stamp}] Комментарий из анкеты: ${comment}` : "",
+            notes: [innNote, comment ? `[${stamp}] Комментарий из анкеты: ${comment}` : ""].filter(Boolean).join("\n"),
             source: "site",
           });
         }
-        notifyAdmin(`🆕 Анкета производителя: ${name}, ИНН ${inn}, ${REGION_BY_ID[regionId].name}. ${person}, ${phone}. Откройте панель управления, чтобы проверить.`);
+        notifyAdmin(`🆕 Анкета производителя: ${name}, ИНН ${inn || "не указан"}, ${REGION_BY_ID[regionId].name}. ${person}, ${phone}. Откройте панель управления, чтобы проверить.`);
         return json(res, 200, { ok: true });
       }
 
