@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useMemo, useRef } from "react";
 import mapData from "@/lib/market/russia-map.json";
 import type { IndexStats } from "@/lib/market/aggregate";
 import { MAP_NAME, REGIONS, REGION_BY_ID, type DirectionId, type RegionId } from "@/lib/market/regions";
 import { rub, tons } from "@/lib/market/format";
 
 const BY_MAP_NAME = new Map(REGIONS.map((r) => [MAP_NAME[r.id], r.id]));
+const MAP_NAME_TO_REGION = (name: string) => BY_MAP_NAME.get(name);
 
 // Дешевле — темнее зелёный, дороже — светлее
 const CHEAP = [31, 90, 37];
@@ -16,14 +17,41 @@ function shade(t: number): string {
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
 
-interface Hover {
-  name: string;
-  regionId?: RegionId;
-  x: number;
-  y: number;
-  /** Ширина карты в момент наведения — чтобы подсказка не вылезала за край */
-  w: number;
-}
+/** Контуры рисуются один раз и меняются только при смене цен/выбора — не при движении мыши */
+const Regions = memo(function Regions({
+  fills,
+  dimmed,
+  selected,
+}: {
+  fills: Map<string, string>;
+  dimmed: Set<string>;
+  selected: string | null;
+}) {
+  return (
+    <>
+      {mapData.regions.map((r) => {
+        const id = MAP_NAME_TO_REGION(r.name);
+        return (
+          <path
+            key={r.name}
+            d={r.d}
+            data-name={r.name}
+            fill={fills.get(r.name) ?? "#eef1ea"}
+            fillOpacity={dimmed.has(r.name) ? 0.35 : 1}
+            className={id ? "agr-map-region" : "agr-map-empty"}
+            role={id ? "button" : undefined}
+            tabIndex={id ? 0 : undefined}
+            aria-label={id ? REGION_BY_ID[id].name : undefined}
+          />
+        );
+      })}
+      {/* Обводка выбранного региона поверх соседей */}
+      {selected && (
+        <path d={mapData.regions.find((r) => r.name === selected)?.d} fill="none" stroke="#0f2413" strokeWidth={2.5} pointerEvents="none" />
+      )}
+    </>
+  );
+});
 
 export default function RussiaMap({
   stats,
@@ -37,94 +65,97 @@ export default function RussiaMap({
   onSelect: (id: RegionId) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<Hover | null>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  const hoverName = useRef<string | null>(null);
 
-  const { min, max } = useMemo(() => {
+  const { fills, dimmed, min, max } = useMemo(() => {
     const prices = [...stats.values()].map((s) => s.index);
-    return { min: Math.min(...prices), max: Math.max(...prices) };
-  }, [stats]);
+    const lo = Math.min(...prices);
+    const hi = Math.max(...prices);
+    const f = new Map<string, string>();
+    const d = new Set<string>();
+    for (const r of REGIONS) {
+      const s = stats.get(r.id);
+      f.set(MAP_NAME[r.id], s ? shade(hi > lo ? (s.index - lo) / (hi - lo) : 0.5) : "#dfe5d8");
+      if (!selected && direction !== "all" && !r.directions.includes(direction)) d.add(MAP_NAME[r.id]);
+    }
+    return { fills: f, dimmed: d, min: lo, max: hi };
+  }, [stats, direction, selected]);
 
-  const fillFor = (id: RegionId | undefined) => {
-    if (!id) return "#eef1ea";
-    const s = stats.get(id);
-    if (!s) return "#dfe5d8";
-    const t = max > min ? (s.index - min) / (max - min) : 0.5;
-    return shade(t);
+  const tipHtml = useCallback(
+    (name: string) => {
+      const id = MAP_NAME_TO_REGION(name);
+      const s = id ? stats.get(id) : undefined;
+      const title = id ? REGION_BY_ID[id].name : name;
+      if (s) {
+        return `<p class="font-semibold text-[13px]">${title}</p><p class="tabular-nums mt-0.5"><b>${rub(s.index)} ₽/т</b> · ${tons(s.volume)}</p><p class="text-white/60">${s.count} предпр. · нажмите, чтобы выбрать</p>`;
+      }
+      return `<p class="font-semibold text-[13px]">${title}</p><p class="text-white/60 mt-0.5">${id ? "сегодня цен ещё нет" : "нет производителей этой культуры"}</p>`;
+    },
+    [stats]
+  );
+
+  // Подсказка двигается напрямую через DOM — без перерисовки 83 контуров
+  const onMove = (e: React.PointerEvent) => {
+    const tip = tipRef.current;
+    const wrap = wrapRef.current;
+    if (!tip || !wrap) return;
+    const name = (e.target as Element).getAttribute?.("data-name");
+    if (!name) {
+      tip.style.opacity = "0";
+      hoverName.current = null;
+      return;
+    }
+    if (hoverName.current !== name) {
+      hoverName.current = name;
+      tip.innerHTML = tipHtml(name);
+    }
+    const rect = wrap.getBoundingClientRect();
+    const x = Math.min(Math.max(e.clientX - rect.left + 14, 0), rect.width - 200);
+    const y = Math.max(e.clientY - rect.top - 70, 0);
+    tip.style.transform = `translate(${x}px, ${y}px)`;
+    tip.style.opacity = "1";
   };
 
-  const inDirection = (id: RegionId) => direction === "all" || REGION_BY_ID[id].directions.includes(direction);
-
-  const move = (e: React.PointerEvent, name: string, regionId?: RegionId) => {
-    const rect = wrapRef.current!.getBoundingClientRect();
-    setHover({ name, regionId, x: e.clientX - rect.left, y: e.clientY - rect.top, w: rect.width });
+  const pick = (e: React.SyntheticEvent) => {
+    const name = (e.target as Element).getAttribute?.("data-name");
+    const id = name ? MAP_NAME_TO_REGION(name) : undefined;
+    if (id) onSelect(id);
   };
-
-  // Выбранный регион рисуем последним, чтобы обводка была поверх соседей
-  const ordered = [...mapData.regions].sort((a, b) => {
-    const sa = BY_MAP_NAME.get(a.name) === selected ? 1 : 0;
-    const sb = BY_MAP_NAME.get(b.name) === selected ? 1 : 0;
-    return sa - sb;
-  });
-
-  const hs = hover?.regionId ? stats.get(hover.regionId) : undefined;
 
   return (
-    <div ref={wrapRef} className="relative w-full select-none" onPointerLeave={() => setHover(null)}>
-      <svg viewBox={`0 0 ${mapData.width} ${mapData.height}`} className="w-full h-auto" role="group" aria-label="Карта регионов России">
-        {ordered.map((r) => {
-          const id = BY_MAP_NAME.get(r.name);
-          const producing = !!id;
-          const dim = producing && !selected && !inDirection(id!);
-          const isSel = id === selected;
-          const isHover = hover?.name === r.name;
-          return (
-            <path
-              key={r.name}
-              d={r.d}
-              fill={fillFor(id)}
-              fillOpacity={dim ? 0.35 : 1}
-              stroke={isSel ? "#0f2413" : isHover && producing ? "#1F5A25" : "#ffffff"}
-              strokeWidth={isSel ? 2.5 : isHover && producing ? 1.8 : 0.7}
-              strokeLinejoin="round"
-              className={producing ? "cursor-pointer transition-[fill-opacity] duration-300 outline-none" : ""}
-              role={producing ? "button" : undefined}
-              tabIndex={producing ? 0 : undefined}
-              aria-label={producing ? REGION_BY_ID[id!].name : undefined}
-              onPointerMove={(e) => move(e, r.name, id)}
-              onClick={() => id && onSelect(id)}
-              onKeyDown={(e) => {
-                if (id && (e.key === "Enter" || e.key === " ")) {
-                  e.preventDefault();
-                  onSelect(id);
-                }
-              }}
-            />
-          );
-        })}
+    <div
+      ref={wrapRef}
+      className="relative w-full select-none"
+      onPointerMove={onMove}
+      onPointerLeave={() => {
+        if (tipRef.current) tipRef.current.style.opacity = "0";
+        hoverName.current = null;
+      }}
+    >
+      <svg
+        viewBox={`0 0 ${mapData.width} ${mapData.height}`}
+        className="w-full h-auto"
+        role="group"
+        aria-label="Карта регионов России"
+        onClick={pick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            pick(e);
+          }
+        }}
+      >
+        <Regions fills={fills} dimmed={dimmed} selected={selected ? MAP_NAME[selected] : null} />
       </svg>
 
-      {hover && (
-        <div
-          className="pointer-events-none absolute z-10 rounded-xl bg-[#0f2413] text-white px-3 py-2 shadow-xl text-xs whitespace-nowrap"
-          style={{ left: Math.min(Math.max(hover.x + 14, 0), hover.w - 190), top: Math.max(hover.y - 64, 0) }}
-        >
-          <p className="font-semibold text-[13px]">{hover.regionId ? REGION_BY_ID[hover.regionId].name : hover.name}</p>
-          {hs ? (
-            <>
-              <p className="tabular-nums mt-0.5">
-                <span className="font-bold">{rub(hs.index)} ₽/т</span> · {tons(hs.volume)}
-              </p>
-              <p className="text-white/60">{hs.count} предпр. · нажмите, чтобы выбрать</p>
-            </>
-          ) : (
-            <p className="text-white/60 mt-0.5">{hover.regionId ? "сегодня цен ещё нет" : "нет производителей в базе"}</p>
-          )}
-        </div>
-      )}
+      <div
+        ref={tipRef}
+        className="pointer-events-none absolute left-0 top-0 z-10 rounded-xl bg-[#0f2413] text-white px-3 py-2 shadow-xl text-xs whitespace-nowrap opacity-0 transition-opacity duration-150"
+      />
 
-      {/* Легенда */}
       {Number.isFinite(min) && (
-        <div className="absolute left-2 bottom-1 md:left-3 md:bottom-2 flex items-center gap-2 rounded-lg bg-white/90 backdrop-blur px-2.5 py-1.5 text-[11px] text-gray-600 shadow-sm">
+        <div className="absolute left-0 bottom-0 flex items-center gap-2 rounded-lg bg-white/90 px-2.5 py-1.5 text-[11px] text-gray-600">
           <span className="tabular-nums">{rub(min)}</span>
           <span className="h-2 w-20 md:w-28 rounded-full" style={{ background: `linear-gradient(90deg, ${shade(0)}, ${shade(1)})` }} />
           <span className="tabular-nums">{rub(max)} ₽/т</span>

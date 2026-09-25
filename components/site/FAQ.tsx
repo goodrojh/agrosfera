@@ -62,12 +62,12 @@ export default function FAQ({ className }: { className?: string }) {
             <img
               src={asset("/media/macro.jpg")}
               alt=""
-              className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-700"
+              loading="lazy"
+              className="w-full h-full object-cover opacity-90"
             />
-            <div className="absolute inset-0 bg-white/10 backdrop-blur-[2px]" />
           </div>
 
-          <div className="relative z-10 bg-white/55 backdrop-blur-2xl rounded-[24px] md:rounded-[32px] border border-white/50 overflow-hidden shadow-[0_24px_80px_rgba(0,0,0,0.08)]">
+          <div className="relative z-10 bg-white/85 rounded-[24px] md:rounded-[32px] border border-white/50 overflow-hidden shadow-[0_24px_80px_rgba(0,0,0,0.08)]">
             {faqs.map((faq, index) => {
               const isOpen = openIndex === index;
               return (

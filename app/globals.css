@@ -47,7 +47,41 @@ body {
   animation: agr-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
+/* Короткая подсветка нового/изменённого значения */
+@keyframes agr-flash {
+  from { background-color: rgba(140, 193, 82, 0.32); }
+  to { background-color: rgba(140, 193, 82, 0); }
+}
+.agr-flash {
+  pointer-events: none;
+  animation: agr-flash 1.4s ease-out forwards;
+}
+
+/* Карта: подсветка при наведении средствами CSS, без перерисовки React */
+.agr-map-region,
+.agr-map-empty {
+  stroke: #fff;
+  stroke-width: 0.7;
+  stroke-linejoin: round;
+}
+.agr-map-region {
+  cursor: pointer;
+  outline: none;
+  transition: fill-opacity 0.3s;
+}
+.agr-map-region:hover,
+.agr-map-region:focus-visible {
+  stroke: #1f5a25;
+  stroke-width: 1.8;
+}
+
+.agr-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #d7dfd0 transparent;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .agr-flash { animation: none; }
   .agr-pulse, .agr-ping { animation: none; }
   html { scroll-behavior: auto; }
 }

@@ -10,10 +10,13 @@ export default function RegionPicker({
   value,
   onChange,
   stats,
+  available,
 }: {
   value: RegionId | null;
   onChange: (id: RegionId | null) => void;
   stats: Map<RegionId, IndexStats>;
+  /** Регионы, где выращивают выбранную культуру */
+  available?: RegionId[];
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -24,8 +27,10 @@ export default function RegionPicker({
 
   const options = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return REGIONS.filter((r) => !q || r.name.toLowerCase().includes(q) || r.macro.toLowerCase().includes(q));
-  }, [query]);
+    return REGIONS.filter(
+      (r) => (!available || available.includes(r.id)) && (!q || r.name.toLowerCase().includes(q) || r.macro.toLowerCase().includes(q))
+    );
+  }, [query, available]);
 
   useEffect(() => {
     const close = (e: MouseEvent) => {

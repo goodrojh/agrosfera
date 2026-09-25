@@ -40,11 +40,24 @@ export interface DemoMarket {
   submit(companyId: string, regionId: RegionId, price: number, volume: number, now: number, current: Quote[], moderation?: boolean): Quote;
 }
 
-export function createDemoMarket(now: number): DemoMarket {
-  const rng = mulberry32(20260925);
+export interface DemoOptions {
+  seed?: number;
+  /** Регионы, где выращивают культуру */
+  regions?: RegionId[];
+  /** Средняя цена культуры по России; региональные различия берутся из справочника регионов */
+  basePrice?: number;
+}
+
+const FLAX_AVG = 31700;
+
+export function createDemoMarket(now: number, opts: DemoOptions = {}): DemoMarket {
+  const rng = mulberry32(opts.seed ?? 20260925);
+  const regionList = opts.regions ? REGIONS.filter((r) => opts.regions!.includes(r.id)) : REGIONS;
+  const regionPrice = (id: RegionId) =>
+    opts.basePrice ? opts.basePrice * (1 + (REGION_BY_ID[id].basePrice / FLAX_AVG - 1) * 0.8) : REGION_BY_ID[id].basePrice;
   const companies: DemoCompany[] = [];
   let seq = 400;
-  for (const r of REGIONS) {
+  for (const r of regionList) {
     const n = 3 + Math.floor(rng() * 4);
     for (let i = 0; i < n; i++) {
       seq += 1 + Math.floor(rng() * 9);
@@ -61,7 +74,7 @@ export function createDemoMarket(now: number): DemoMarket {
 
   // Региональные случайные блуждания с возвратом к среднему
   const walk: Record<string, number[]> = {};
-  for (const r of REGIONS) {
+  for (const r of regionList) {
     const arr: number[] = [];
     let v = 0;
     for (let d = 0; d < HISTORY_DAYS; d++) {
@@ -71,7 +84,7 @@ export function createDemoMarket(now: number): DemoMarket {
     walk[r.id] = arr;
   }
   const factor = (regionId: RegionId, d: number) =>
-    REGION_BY_ID[regionId].basePrice * marketFactor(d) * walk[regionId][d + HISTORY_DAYS - 1];
+    regionPrice(regionId) * marketFactor(d) * walk[regionId][d + HISTORY_DAYS - 1];
 
   const history: DailyClose[] = [];
   for (let d = -(HISTORY_DAYS - 1); d < 0; d++) {

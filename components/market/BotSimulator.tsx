@@ -8,6 +8,7 @@ import { referenceInfo } from "@/lib/market/aggregate";
 import { GREETING, replyToButton, replyToText, type BotReply, type ButtonId, type Pending } from "@/lib/market/dialog";
 import { REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
 import { asset } from "@/lib/config";
+import type { Quote } from "@/lib/market/types";
 
 interface Msg {
   id: number;
@@ -17,10 +18,13 @@ interface Msg {
   used?: boolean;
 }
 
+const EMPTY_LATEST = new Map<string, Quote>();
 const EXAMPLES = ["31500 200", "30 150", "325000 150", "46000 120"];
 
 export default function BotSimulator() {
-  const { latest, submitFromSimulator, mode } = useMarket();
+  const { latest: marketLatest, crop, submitFromSimulator, mode } = useMarket();
+  // Бот принимает цены на лён — сравниваем только с рынком льна
+  const latest = crop === "flax" ? marketLatest : EMPTY_LATEST;
   const [region, setRegion] = useState<RegionId>("omsk");
   const [msgs, setMsgs] = useState<Msg[]>([{ id: 0, from: "bot", text: GREETING }]);
   const [input, setInput] = useState("");

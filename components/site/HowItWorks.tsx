@@ -320,17 +320,14 @@ export default function HowItWorks({ className }: { className?: string }) {
                     <img
                       src={asset(step.image)}
                       alt=""
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-[3000ms]"
+                      loading="lazy"
+                      className="w-full h-full object-cover"
                     />
                   </div>
-                  <motion.div
-                    animate={{ y: [0, -10, 0] }}
-                    transition={{ repeat: Infinity as number, duration: 4, ease: "easeInOut" as const }}
-                    className="w-full max-w-[380px] relative z-10 bg-white/60 backdrop-blur-[24px] border border-white/80 rounded-[24px] md:rounded-[32px] p-5 md:p-7 shadow-[0_40px_80px_rgba(0,0,0,0.12)] overflow-hidden"
-                  >
-                    <div className="absolute -top-1/2 -left-1/2 w-full h-full bg-gradient-to-br from-white/40 to-transparent rotate-45 pointer-events-none" />
-                    <div className="relative z-10">{renderMockup()}</div>
-                  </motion.div>
+                  {/* Статичная карточка: без бесконечной анимации поверх размытия — это главный источник подтормаживаний */}
+                  <div className="w-full max-w-[380px] relative z-10 bg-white/85 border border-white rounded-[24px] md:rounded-[32px] p-5 md:p-7 shadow-[0_30px_60px_rgba(0,0,0,0.12)]">
+                    {renderMockup()}
+                  </div>
                 </div>
               </div>
             </motion.div>

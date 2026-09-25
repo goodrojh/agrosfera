@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Minus, X } from "lucide-react";
+import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, Layers, List, Map as MapIcon, Minus } from "lucide-react";
 import { useMarket } from "@/components/market/MarketProvider";
 import PriceChart from "@/components/market/PriceChart";
 import RussiaMap from "@/components/market/RussiaMap";
@@ -14,14 +13,23 @@ import {
   inScope,
   intradaySeries,
   lastHistoryDay,
-  regionRows,
   type IndexStats,
   type Scope,
 } from "@/lib/market/aggregate";
+import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
 import { DIRECTIONS, DIRECTION_BY_ID, REGIONS, REGION_BY_ID, type DirectionId, type RegionId } from "@/lib/market/regions";
 import { ago, pct, rub, time, tons } from "@/lib/market/format";
-import { TELEGRAM_BOT_URL } from "@/lib/config";
+import type { DailyClose, Quote } from "@/lib/market/types";
 import { openLead } from "@/lib/lead";
+
+type Tab = "book" | "chart" | "map" | "regions";
+
+const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+  { id: "book", label: "Стакан", icon: Layers },
+  { id: "chart", label: "График", icon: BarChart3 },
+  { id: "map", label: "Карта", icon: MapIcon },
+  { id: "regions", label: "Регионы", icon: List },
+];
 
 const PERIODS = [
   { id: "day", label: "Сегодня", days: 1 },
@@ -30,18 +38,14 @@ const PERIODS = [
   { id: "90", label: "3 месяца", days: 90 },
 ] as const;
 
-type PeriodId = (typeof PERIODS)[number]["id"];
-
-function Change({ value, big = false }: { value: number | null; big?: boolean }) {
+function Change({ value }: { value: number | null }) {
   if (value === null || !Number.isFinite(value)) return <span className="text-gray-400">—</span>;
   const up = value > 0.0005;
   const down = value < -0.0005;
   const Icon = up ? ArrowUpRight : down ? ArrowDownRight : Minus;
-  const tone = up ? "text-[#2f7a1f]" : down ? "text-[#c0492f]" : "text-gray-500";
-  const bg = big ? (up ? "bg-[#8CC152]/15" : down ? "bg-[#E07A5F]/12" : "bg-gray-100") : "";
   return (
-    <span className={`inline-flex items-center gap-0.5 font-semibold tabular-nums rounded-full ${big ? "text-sm px-2.5 py-1" : "text-xs"} ${tone} ${bg}`}>
-      <Icon size={big ? 15 : 13} />
+    <span className={"inline-flex items-center gap-0.5 font-semibold tabular-nums " + (up ? "text-[#2f7a1f]" : down ? "text-[#c0492f]" : "text-gray-500")}>
+      <Icon size={14} />
       {pct(value)}
     </span>
   );
@@ -50,415 +54,385 @@ function Change({ value, big = false }: { value: number | null; big?: boolean })
 function LiveAgo({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    const id = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(id);
   }, []);
   return <>{since ? ago(since, now) : "—"}</>;
 }
 
-const card = "bg-white rounded-2xl border border-[#e6ebe1] shadow-[0_1px_2px_rgba(16,40,20,0.04)]";
+/** График рендерится только на своей вкладке */
+function ChartPanel({
+  today,
+  history,
+  latest,
+  scope,
+  nowTs,
+  minCount,
+}: {
+  today: Quote[];
+  history: DailyClose[];
+  latest: Map<string, Quote>;
+  scope: Scope;
+  nowTs: number;
+  minCount: number;
+}) {
+  const [period, setPeriod] = useState<(typeof PERIODS)[number]["id"]>("day");
+  const series = useMemo(() => {
+    const p = PERIODS.find((x) => x.id === period)!;
+    return period === "day" ? intradaySeries(today, scope, minCount) : dailySeries(history, latest, scope, p.days, nowTs);
+  }, [period, today, history, latest, scope, nowTs, minCount]);
+
+  return (
+    <div>
+      <div className="flex bg-gray-100 p-1 rounded-lg w-fit mb-5">
+        {PERIODS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setPeriod(p.id)}
+            className={
+              "px-3 py-1.5 text-sm rounded-md whitespace-nowrap transition-colors " +
+              (period === p.id ? "bg-white text-gray-900 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-800")
+            }
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <div className="h-[300px] md:h-[380px]">
+        <PriceChart points={series} kind={period === "day" ? "intraday" : "daily"} animKey={`${period}-${scope.direction}-${scope.region}`} />
+      </div>
+    </div>
+  );
+}
+
+/** Таблица регионов — только на своей вкладке */
+function RegionsPanel({
+  regionStats,
+  prevCloses,
+  direction,
+  selected,
+  onPick,
+}: {
+  regionStats: Map<RegionId, IndexStats>;
+  prevCloses: DailyClose[];
+  direction: DirectionId | "all";
+  selected: RegionId | null;
+  onPick: (id: RegionId) => void;
+}) {
+  const rows = useMemo(() => {
+    const list = REGIONS.filter((r) => regionStats.has(r.id) && (direction === "all" || r.directions.includes(direction))).map((r) => {
+      const st = regionStats.get(r.id)!;
+      const prev = computeIndex(prevCloses.filter((h) => h.regionId === r.id));
+      return { id: r.id, st, change: prev ? st.index / prev.index - 1 : null };
+    });
+    return list.sort((a, b) => a.st.index - b.st.index);
+  }, [regionStats, prevCloses, direction]);
+  const min = rows[0]?.st.index ?? 0;
+  const max = rows[rows.length - 1]?.st.index ?? 1;
+
+  return (
+    <div>
+      <div className="hidden md:grid grid-cols-[1.5fr_1.6fr_0.7fr_0.9fr] gap-4 px-3 pb-3 text-xs text-gray-400">
+        <span>Регион</span>
+        <span>Цена, ₽/т</span>
+        <span className="text-right">К вчера</span>
+        <span className="text-right">Готовы отгрузить</span>
+      </div>
+      <div className="max-h-[480px] overflow-y-auto agr-scroll">
+        {rows.map((r, i) => (
+          <button
+            key={r.id}
+            onClick={() => onPick(r.id)}
+            className={"w-full text-left px-3 py-3 rounded-lg transition-colors " + (selected === r.id ? "bg-[#f3f8ee]" : "hover:bg-gray-50")}
+          >
+            <span className="grid grid-cols-[1fr_auto] md:grid-cols-[1.5fr_1.6fr_0.7fr_0.9fr] gap-x-4 gap-y-0.5 items-center">
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-gray-900 truncate">{REGION_BY_ID[r.id].name}</span>
+                <span className="block text-xs text-gray-400">
+                  {r.st.count} предпр.
+                  {i === 0 && <span className="ml-1.5 text-[#2f7a1f] font-medium">дешевле всего</span>}
+                </span>
+              </span>
+              <span className="flex items-center gap-3 justify-end md:justify-start">
+                <span className="hidden md:block flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                  <span
+                    className="block h-full rounded-full bg-[#8CC152]"
+                    style={{ width: `${18 + ((r.st.index - min) / Math.max(1, max - min)) * 82}%` }}
+                  />
+                </span>
+                <span className="text-sm font-bold tabular-nums text-gray-900 md:w-16 text-right">{rub(r.st.index)}</span>
+              </span>
+              <span className="text-xs md:text-right">
+                <Change value={r.change} />
+              </span>
+              <span className="text-right text-sm tabular-nums text-gray-600">{tons(r.st.volume)}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Terminal() {
-  const { ready, mode, companies, companyById, today, history, latest, lastEventAt } = useMarket();
+  const { ready, mode, crop, setCrop, supported, companies, companyById, today, history, latest, lastEventAt } = useMarket();
   const [direction, setDirection] = useState<DirectionId | "all">("all");
   const [region, setRegion] = useState<RegionId | null>(null);
-  const [period, setPeriod] = useState<PeriodId>("day");
+  const [tab, setTab] = useState<Tab>("book");
 
-  const scope: Scope = { direction, region };
-  // «Сейчас» для рынка — время последнего события: расчёт остаётся чистой функцией данных
-  const nowTs = lastEventAt;
+  const scope = useMemo<Scope>(() => ({ direction, region }), [direction, region]);
+  const cropInfo = CROP_BY_ID[crop];
 
-  const data = useMemo(() => {
+  // Прошлые дни меняются только при загрузке — считаем отдельно от живого потока
+  const prevCloses = useMemo(() => {
+    const d = lastHistoryDay(history);
+    return history.filter((h) => h.day === d);
+  }, [history]);
+
+  const live = useMemo(() => {
     if (!ready) return null;
     const all = [...latest.values()];
     const inS = all.filter((q) => inScope(q.regionId, scope));
     const stats = computeIndex(inS);
-    const prevDay = lastHistoryDay(history);
-    const prevStats = computeIndex(history.filter((h) => h.day === prevDay && inScope(h.regionId, scope)));
-    const p = PERIODS.find((x) => x.id === period)!;
-    const total = companies.filter((c) => inScope(c.regionId, scope)).length;
-    // Линия за сегодня начинается, когда цену прислала заметная часть предприятий — без ложных скачков по первым подачам
-    const minCount = region ? 1 : Math.max(3, Math.round(total * 0.35));
-    const series =
-      period === "day" ? intradaySeries(today, scope, minCount) : dailySeries(history, latest, scope, p.days, nowTs);
-
-    const rows = regionRows(latest, history, direction)
-      .filter((r) => r.stats)
-      .sort((a, b) => a.stats!.index - b.stats!.index);
-    const rowMin = rows.length ? rows[0].stats!.index : 0;
-    const rowMax = rows.length ? rows[rows.length - 1].stats!.index : 1;
-
-    const directionCards = [
-      { id: "all" as const, name: "Все регионы", hubs: `${REGIONS.length} регионов России`, stats: computeIndex(all) },
-      ...DIRECTIONS.map((d) => ({
-        id: d.id,
-        name: d.name,
-        hubs: d.hubs,
-        stats: computeIndex(all.filter((q) => REGION_BY_ID[q.regionId].directions.includes(d.id))),
-      })),
-    ];
-
-    const todayScoped = today.filter((q) => inScope(q.regionId, scope));
-    const feed = [...todayScoped].sort((a, b) => b.at - a.at).slice(0, 12);
-
-    // Цена по каждому региону — для карты и списка выбора
+    const prevStats = computeIndex(prevCloses.filter((h) => inScope(h.regionId, scope)));
     const regionStats = new Map<RegionId, IndexStats>();
     for (const r of REGIONS) {
       const st = computeIndex(all.filter((q) => q.regionId === r.id));
       if (st) regionStats.set(r.id, st);
     }
+    const dirPrice = new Map<DirectionId | "all", number | undefined>([["all", computeIndex(all)?.index]]);
+    for (const d of DIRECTIONS) dirPrice.set(d.id, computeIndex(all.filter((q) => REGION_BY_ID[q.regionId].directions.includes(d.id)))?.index);
+    const total = companies.filter((c) => inScope(c.regionId, scope)).length;
+    return { inS, stats, change: stats && prevStats ? stats.index / prevStats.index - 1 : null, regionStats, dirPrice, total };
+  }, [ready, latest, prevCloses, companies, scope]);
 
-    return {
-      stats,
-      inS,
-      regionStats,
-      change: stats && prevStats ? stats.index / prevStats.index - 1 : null,
-      series,
-      rows,
-      rowMin,
-      rowMax,
-      directionCards,
-      feed,
-      submitted: inS.length,
-      total,
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, latest, history, today, companies, direction, region, period, nowTs]);
+  const feed = useMemo(
+    () => today.filter((q) => inScope(q.regionId, scope)).sort((a, b) => b.at - a.at).slice(0, 8),
+    [today, scope]
+  );
 
-  const s = data?.stats;
-  const scopeName = region
-    ? REGION_BY_ID[region].name
-    : direction === "all"
-      ? "все регионы"
-      : `направление «${DIRECTION_BY_ID[direction].name}»`;
-  const filteredRows = data?.rows ?? [];
-  const botHref = TELEGRAM_BOT_URL || "#bot";
-
-  const pickDirection = (d: DirectionId | "all") => {
-    setDirection(d);
-    setRegion(null);
+  const chooseCrop = (c: CropId) => {
+    setCrop(c);
+    if (region && !CROP_BY_ID[c].regions.includes(region)) setRegion(null);
   };
-  /** Выбор региона: из списка, на карте или в таблице. Если регион вне направления — переключаем на «Все регионы» */
   const selectRegion = (r: RegionId | null) => {
     if (r && direction !== "all" && !REGION_BY_ID[r].directions.includes(direction)) setDirection("all");
     setRegion(r);
   };
-  const pickRegion = (r: RegionId) => {
-    selectRegion(region === r ? null : r);
-    document.getElementById("terminal-summary")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+
+  const s = live?.stats;
+  const minCount = region ? 1 : Math.max(3, Math.round((live?.total ?? 0) * 0.35));
 
   return (
-    <section id="terminal" className="bg-white py-14 md:py-20 px-4 md:px-8 scroll-mt-4">
-      <div className="max-w-7xl mx-auto">
+    <section id="terminal" className="bg-white py-16 md:py-24 px-4 md:px-8 scroll-mt-4">
+      <div className="max-w-6xl mx-auto">
         {/* Заголовок */}
-        <div className="mb-8">
-          <div className="flex flex-wrap items-center gap-2 mb-3">
-            <span className="inline-flex items-center gap-2 rounded-full bg-[#8CC152]/15 text-[#1F5A25] px-3 py-1 text-xs font-semibold">
-              <span className="w-2 h-2 rounded-full bg-[#4f9a2a] agr-pulse" />
-              Обновлено <LiveAgo since={lastEventAt} />
-            </span>
-            {mode === "demo" && (
-              <span className="rounded-full bg-amber-50 border border-amber-200 text-amber-800 px-3 py-1 text-xs font-medium">демо-данные</span>
-            )}
-          </div>
-          <h2 className="text-[32px] md:text-[44px] font-semibold tracking-tight text-[#111] leading-[1.1]">Котировки масличного льна</h2>
-          <p className="text-gray-500 mt-2 max-w-2xl">
-            Цена за тонну с НДС на складе производителя (EXW). Цены присылают сами предприятия — каждое утро и при любом изменении.
-          </p>
-        </div>
-
-        {/* 1. Направление */}
-        <p className="text-sm font-semibold text-gray-900 mb-3">Куда поставка?</p>
-        <div className="flex md:grid md:grid-cols-5 gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 md:mx-0 md:px-0 pb-1">
-          {(data?.directionCards ?? []).map((d) => {
-            const active = direction === d.id;
-            return (
-              <button
-                key={d.id}
-                onClick={() => pickDirection(d.id)}
-                className={
-                  "shrink-0 w-[210px] md:w-auto text-left rounded-2xl border p-4 transition-all " +
-                  (active ? "border-[#1F5A25] bg-[#f3f8ee] ring-1 ring-[#1F5A25]" : "border-[#e6ebe1] bg-white hover:border-[#8CC152] hover:bg-[#fafcf8]")
-                }
-              >
-                <p className={"text-sm font-semibold " + (active ? "text-[#1F5A25]" : "text-gray-900")}>{d.name}</p>
-                <p className="text-xl font-bold tabular-nums text-[#111] mt-1.5">
-                  {d.stats ? rub(d.stats.index) : "—"} <span className="text-sm font-medium text-gray-400">₽/т</span>
-                </p>
-                <p className="text-[11px] text-gray-500 mt-1 leading-snug line-clamp-2">{d.hubs}</p>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* 2. Регион */}
-        <div id="terminal-summary" className="mt-6 mb-5 scroll-mt-6">
-          <p className="text-sm font-semibold text-gray-900 mb-3">
-            Регион <span className="font-normal text-gray-400">— необязательно</span>
-          </p>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <RegionPicker value={region} onChange={selectRegion} stats={data?.regionStats ?? new Map()} />
-            <span className="text-sm text-gray-500">
-              или нажмите на регион на{" "}
-              <button
-                onClick={() => document.getElementById("terminal-map")?.scrollIntoView({ behavior: "smooth", block: "center" })}
-                className="text-[#1F5A25] font-medium underline underline-offset-2 decoration-[#1F5A25]/30 hover:decoration-[#1F5A25]"
-              >
-                карте
-              </button>
-            </span>
-          </div>
-          <p className="text-sm mt-4">
-            <span className="text-gray-500">Показано: </span>
-            <span className="font-semibold text-gray-900">{scopeName}</span>
-            {direction !== "all" && !region && <span className="text-gray-400"> · {DIRECTION_BY_ID[direction].note}</span>}
-          </p>
-        </div>
-
-        {/* 2. Три главные цифры */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className={card + " p-5 md:p-6"}>
-            <p className="text-sm text-gray-500">Средняя цена</p>
-            <div className="flex items-end gap-2 mt-2">
-              <p className="text-[40px] leading-none font-bold tabular-nums text-[#111] tracking-tight">{s ? rub(s.index) : "—"}</p>
-              <p className="text-lg text-gray-400 font-medium mb-0.5">₽/т</p>
-            </div>
-            <div className="flex items-center gap-2 mt-3 text-sm">
-              <Change value={data?.change ?? null} big />
-              <span className="text-gray-500">к вчера</span>
-            </div>
-            <p className="text-xs text-gray-400 mt-3">Медиана: половина предприятий продаёт дешевле, половина — дороже.</p>
-          </div>
-
-          <div className={card + " p-5 md:p-6"}>
-            <p className="text-sm text-gray-500">Разброс цен</p>
-            <p className="text-[26px] leading-tight font-bold tabular-nums text-[#111] mt-2">
-              {s ? `${rub(s.min)} – ${rub(s.max)}` : "—"} <span className="text-base text-gray-400 font-medium">₽/т</span>
-            </p>
-            {s && (
-              <div className="relative h-2.5 rounded-full bg-gray-100 mt-4">
-                <motion.div
-                  className="absolute h-full rounded-full bg-[#8CC152]/45"
-                  animate={{
-                    left: `${((s.p25 - s.min) / Math.max(1, s.max - s.min)) * 100}%`,
-                    width: `${Math.max(3, ((s.p75 - s.p25) / Math.max(1, s.max - s.min)) * 100)}%`,
-                  }}
-                />
-                <motion.div
-                  className="absolute -top-1 h-[18px] w-[3px] rounded-full bg-[#1F5A25]"
-                  animate={{ left: `calc(${((s.index - s.min) / Math.max(1, s.max - s.min)) * 100}% - 1.5px)` }}
-                />
-              </div>
-            )}
-            <p className="text-xs text-gray-400 mt-3">
-              У большинства предприятий:{" "}
-              <span className="text-gray-600 font-medium tabular-nums">{s ? `${rub(s.p25)} – ${rub(s.p75)} ₽/т` : "—"}</span>
-            </p>
-          </div>
-
-          <div className={card + " p-5 md:p-6"}>
-            <p className="text-sm text-gray-500">Готовы отгрузить</p>
-            <div className="flex items-end gap-2 mt-2">
-              <p className="text-[40px] leading-none font-bold tabular-nums text-[#111] tracking-tight">{s ? rub(s.volume) : "—"}</p>
-              <p className="text-lg text-gray-400 font-medium mb-0.5">тонн</p>
-            </div>
-            <p className="text-sm text-gray-600 mt-3">
-              <span className="font-semibold tabular-nums">{data?.submitted ?? 0}</span> из {data?.total ?? 0} предприятий прислали цену сегодня
-            </p>
-            <p className="text-xs text-gray-400 mt-3">Свободный объём, который предприятия готовы продать сейчас.</p>
-          </div>
-        </div>
-
-        {/* 3. Карта + стакан */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mt-4">
-          <div id="terminal-map" className={card + " lg:col-span-3 p-5 md:p-6 flex flex-col"}>
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-              <div>
-                <h3 className="font-semibold text-gray-900">Карта цен</h3>
-                <p className="text-xs text-gray-500 mt-0.5">Чем темнее, тем дешевле. Нажмите на регион, чтобы выбрать его.</p>
-              </div>
-              {region && (
-                <button
-                  onClick={() => selectRegion(null)}
-                  className="inline-flex items-center gap-1 rounded-full bg-gray-100 hover:bg-gray-200 px-3 py-1 text-xs text-gray-700 transition-colors"
-                >
-                  {REGION_BY_ID[region].name} <X size={12} />
-                </button>
-              )}
-            </div>
-            <div className="flex-1 flex items-center">
-              {data && <RussiaMap stats={data.regionStats} direction={direction} selected={region} onSelect={(id) => selectRegion(region === id ? null : id)} />}
-            </div>
-          </div>
-          <div className={card + " lg:col-span-2 p-5 md:p-6"}>
-            <OrderBook quotes={data?.inS ?? []} />
-          </div>
-        </div>
-
-        {/* 4. График + последние цены */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
-          <div className={card + " lg:col-span-2 p-5 md:p-6 flex flex-col"}>
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <h3 className="font-semibold text-gray-900">Как менялась цена</h3>
-              <div className="flex bg-gray-100 p-1 rounded-xl">
-                {PERIODS.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setPeriod(p.id)}
-                    className={
-                      "px-3 py-1.5 text-xs md:text-sm rounded-lg whitespace-nowrap transition-all " +
-                      (period === p.id ? "bg-white text-gray-900 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-800")
-                    }
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="h-[280px] md:h-[340px]">
-              {data && <PriceChart points={data.series} kind={period === "day" ? "intraday" : "daily"} animKey={`${period}-${direction}-${region}`} />}
-            </div>
-            <p className="text-xs text-gray-400 mt-3">Наведите на график, чтобы увидеть цену и объём в конкретный момент.</p>
-          </div>
-
-          <div className={card + " p-5 md:p-6 flex flex-col"}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-900">Последние цены</h3>
-              <span className="text-xs text-gray-400">из бота, онлайн</span>
-            </div>
-            <ul className="flex-1 overflow-y-auto no-scrollbar max-h-[380px] -mx-2">
-              <AnimatePresence initial={false}>
-                {data?.feed.map((q) => {
-                  const bad = q.status !== "accepted";
-                  return (
-                    <motion.li
-                      key={q.id}
-                      layout
-                      initial={{ opacity: 0, backgroundColor: "rgba(140,193,82,0.25)" }}
-                      animate={{ opacity: 1, backgroundColor: "rgba(140,193,82,0)" }}
-                      transition={{ duration: 1.2 }}
-                      className="px-2 py-2.5 rounded-lg border-b border-gray-100 last:border-b-0"
-                    >
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-sm text-gray-800 truncate">{REGION_BY_ID[q.regionId].name}</span>
-                        <span className="text-xs text-gray-400 tabular-nums shrink-0">{time(q.at)}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 mt-0.5">
-                        <span className={"text-sm tabular-nums " + (bad ? "text-gray-400 line-through" : "font-semibold text-gray-900")}>
-                          {rub(q.price)} ₽/т <span className="font-normal text-gray-500">· {tons(q.volume)}</span>
-                        </span>
-                        {bad ? (
-                          <span className="text-[11px] text-[#c0492f] shrink-0">{q.status === "moderation" ? "на проверке" : "не учтено"}</span>
-                        ) : q.revision > 1 && q.prevPrice && q.prevPrice !== q.price ? (
-                          <span className="text-[11px] text-gray-500 shrink-0 tabular-nums">было {rub(q.prevPrice)}</span>
-                        ) : q.revision > 1 ? (
-                          <span className="text-[11px] text-gray-500 shrink-0">обновлён объём</span>
-                        ) : (
-                          <span className="text-[11px] text-[#2f7a1f] shrink-0">новая</span>
-                        )}
-                      </div>
-                      {bad && q.note && <p className="text-[11px] text-gray-400 mt-0.5">{q.note}</p>}
-                      <p className="text-[11px] text-gray-400 mt-0.5">{companyById.get(q.companyId)?.code}</p>
-                    </motion.li>
-                  );
-                })}
-              </AnimatePresence>
-            </ul>
-          </div>
-        </div>
-
-        {/* 5. Регионы */}
-        <div className={card + " mt-4 p-5 md:p-6"}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-            <div>
-              <h3 className="font-semibold text-gray-900">Цены по регионам</h3>
-              <p className="text-xs text-gray-500 mt-0.5">От дешёвых к дорогим. Нажмите на регион, чтобы посмотреть его график.</p>
-            </div>
-          </div>
-
-          <div className="hidden md:grid grid-cols-[1.4fr_1.6fr_0.7fr_0.8fr_0.6fr] gap-4 px-3 pb-2 text-xs text-gray-400">
-            <span>Регион</span>
-            <span>Цена, ₽/т</span>
-            <span className="text-right">К вчера</span>
-            <span className="text-right">Готовы отгрузить</span>
-            <span className="text-right">Обновлено</span>
-          </div>
-          <div className="divide-y divide-gray-100">
-            {filteredRows.map((r, i) => {
-              const st = r.stats!;
-              const width = 18 + ((st.index - data!.rowMin) / Math.max(1, data!.rowMax - data!.rowMin)) * 82;
-              const selected = region === r.regionId;
-              return (
-                <button
-                  key={r.regionId}
-                  onClick={() => pickRegion(r.regionId)}
-                  className={"w-full text-left px-3 py-3 rounded-xl transition-colors " + (selected ? "bg-[#f3f8ee]" : "hover:bg-gray-50")}
-                >
-                  {/* Телефон: компактная строка */}
-                  <span className="flex md:hidden items-center justify-between gap-3">
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-gray-900">{REGION_BY_ID[r.regionId].name}</span>
-                      <span className="flex flex-wrap items-center gap-x-2 text-xs text-gray-400 mt-0.5">
-                        <span>{st.count} предпр.</span>
-                        <Change value={r.change} />
-                        {i === 0 && <span className="text-[#2f7a1f] font-medium">дешевле всего</span>}
-                      </span>
-                    </span>
-                    <span className="text-right shrink-0">
-                      <span className="block text-sm font-bold tabular-nums text-gray-900">{rub(st.index)} ₽</span>
-                      <span className="block text-xs tabular-nums text-gray-500">{tons(st.volume)}</span>
-                    </span>
-                  </span>
-
-                  {/* Десктоп: таблица */}
-                  <span className="hidden md:grid grid-cols-[1.4fr_1.6fr_0.7fr_0.8fr_0.6fr] gap-x-4 items-center">
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-gray-900 truncate">{REGION_BY_ID[r.regionId].name}</span>
-                      <span className="block text-xs text-gray-400">
-                        {REGION_BY_ID[r.regionId].macro} · {st.count} предпр.
-                        {i === 0 && <span className="ml-1.5 text-[#2f7a1f] font-medium">дешевле всего</span>}
-                      </span>
-                    </span>
-                    <span className="flex items-center gap-3">
-                      <span className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
-                        <motion.span className="block h-full rounded-full bg-[#8CC152]" animate={{ width: `${width}%` }} transition={{ duration: 0.5 }} />
-                      </span>
-                      <span className="text-sm font-bold tabular-nums text-gray-900 w-16 text-right">{rub(st.index)}</span>
-                    </span>
-                    <span className="text-right text-xs">
-                      <Change value={r.change} />
-                    </span>
-                    <span className="text-right text-sm tabular-nums text-gray-700">{tons(st.volume)}</span>
-                    <span className="text-right text-xs tabular-nums text-gray-400">{r.updatedAt ? time(r.updatedAt) : "—"}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 6. Действие */}
-        <div className="mt-4 rounded-2xl bg-[#1F5A25] text-white p-6 md:p-8 flex flex-col md:flex-row md:items-center justify-between gap-5">
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xl md:text-2xl font-semibold">Нужен объём по этой цене?</p>
-            <p className="text-white/75 mt-1 text-sm md:text-base">Соберём партию у производителей из подходящих регионов и доставим до порта или границы.</p>
+            <h2 className="text-[34px] md:text-[46px] font-semibold tracking-tight text-[#111] leading-none">Котировки</h2>
+            <p className="text-gray-500 mt-3">₽ за тонну с НДС · самовывоз со склада производителя</p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3 shrink-0">
-            <button
-              onClick={() => openLead("exporter")}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white text-[#1F5A25] px-5 py-3 font-semibold hover:bg-[#f3f8ee] transition-colors"
-            >
-              Оставить заявку <ArrowRight size={17} />
-            </button>
-            <a
-              href={botHref}
-              className="inline-flex items-center justify-center rounded-xl border border-white/30 px-5 py-3 font-medium text-white hover:bg-white/10 transition-colors"
-            >
-              Я производитель — подать цену
-            </a>
+          <div className="flex items-center gap-2 text-xs">
+            {mode === "demo" && <span className="rounded-full bg-amber-50 text-amber-800 px-3 py-1 font-medium">демо-данные</span>}
+            <span className="inline-flex items-center gap-2 rounded-full bg-[#f3f8ee] text-[#1F5A25] px-3 py-1 font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#4f9a2a] agr-pulse" />
+              обновлено <LiveAgo since={lastEventAt} />
+            </span>
           </div>
         </div>
+
+        {/* Культура */}
+        <div className="mt-8 flex gap-2 overflow-x-auto no-scrollbar -mx-4 px-4 md:mx-0 md:px-0" role="tablist" aria-label="Культура">
+          {CROPS.map((c) => (
+            <button
+              key={c.id}
+              role="tab"
+              aria-selected={crop === c.id}
+              onClick={() => chooseCrop(c.id)}
+              className={
+                "shrink-0 rounded-full px-4 py-2 text-sm font-medium transition-colors " +
+                (crop === c.id ? "bg-[#1F5A25] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900")
+              }
+            >
+              {c.name}
+              {mode === "live" && !c.live && <span className="ml-1.5 text-[11px] opacity-60">скоро</span>}
+            </button>
+          ))}
+        </div>
+
+        {!supported ? (
+          <div className="mt-10 rounded-2xl border border-dashed border-gray-300 p-10 text-center">
+            <p className="text-xl font-semibold text-gray-900">{cropInfo.name}: подключаем производителей</p>
+            <p className="text-gray-500 mt-2 max-w-md mx-auto">Котировки появятся, как только предприятия начнут присылать цены в бот.</p>
+            <button onClick={() => openLead("producer")} className="mt-6 rounded-xl bg-[#1F5A25] text-white px-5 py-3 font-semibold hover:bg-[#174a1c]">
+              Подключить предприятие
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Фильтры: одна строка */}
+            <div id="terminal-summary" className="mt-8 flex flex-col lg:flex-row lg:items-start gap-5 lg:gap-8 scroll-mt-6">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Куда поставка</p>
+                <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-4 px-4 lg:mx-0 lg:px-0">
+                  {[{ id: "all" as const, name: "Все" }, ...DIRECTIONS].map((d) => {
+                    const on = direction === d.id;
+                    const price = live?.dirPrice.get(d.id);
+                    return (
+                      <button
+                        key={d.id}
+                        onClick={() => {
+                          setDirection(d.id);
+                          setRegion(null);
+                        }}
+                        className={
+                          "shrink-0 rounded-xl border px-3.5 py-2 text-left transition-colors " +
+                          (on ? "border-[#1F5A25] bg-[#f3f8ee]" : "border-gray-200 hover:border-gray-300")
+                        }
+                      >
+                        <span className={"block text-sm font-medium " + (on ? "text-[#1F5A25]" : "text-gray-800")}>{d.name}</span>
+                        <span className="block text-xs text-gray-500 tabular-nums">{price ? `${rub(price)} ₽` : "—"}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Регион · из списка или на карте</p>
+                <RegionPicker value={region} onChange={selectRegion} stats={live?.regionStats ?? new Map()} available={cropInfo.regions} />
+              </div>
+            </div>
+            {direction !== "all" && !region && (
+              <p className="mt-3 text-sm text-gray-500">
+                Пункты отгрузки: <span className="text-gray-700">{DIRECTION_BY_ID[direction].hubs}</span>
+              </p>
+            )}
+
+            {/* Три главные цифры — в одной карточке */}
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-3 rounded-2xl border border-[#e6ebe1] divide-y md:divide-y-0 md:divide-x divide-[#e6ebe1]">
+              <div className="p-6 md:p-7">
+                <p className="text-sm text-gray-500" title="Медиана: половина предприятий продаёт дешевле, половина — дороже">
+                  Средняя цена
+                </p>
+                <p className="mt-2 text-4xl font-bold tabular-nums tracking-tight text-[#111]">
+                  {s ? rub(s.index) : "—"} <span className="text-lg font-medium text-gray-400">₽/т</span>
+                </p>
+                <p className="mt-2 text-sm text-gray-500">
+                  <Change value={live?.change ?? null} /> к вчера
+                </p>
+              </div>
+              <div className="p-6 md:p-7">
+                <p className="text-sm text-gray-500">Разброс цен</p>
+                <p className="mt-2 text-[26px] leading-[40px] font-bold tabular-nums text-[#111]">{s ? `${rub(s.min)} – ${rub(s.max)}` : "—"}</p>
+                <p className="mt-2 text-sm text-gray-500">
+                  у большинства <span className="tabular-nums text-gray-700">{s ? `${rub(s.p25)} – ${rub(s.p75)}` : "—"}</span>
+                </p>
+              </div>
+              <div className="p-6 md:p-7">
+                <p className="text-sm text-gray-500">Готовы отгрузить</p>
+                <p className="mt-2 text-4xl font-bold tabular-nums tracking-tight text-[#111]">
+                  {s ? rub(s.volume) : "—"} <span className="text-lg font-medium text-gray-400">т</span>
+                </p>
+                <p className="mt-2 text-sm text-gray-500">
+                  <span className="tabular-nums text-gray-700">{live?.inS.length ?? 0}</span> из {live?.total ?? 0} предприятий прислали цену
+                </p>
+              </div>
+            </div>
+
+            {/* Главная панель с вкладками + лента */}
+            <div className="mt-8 grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
+              <div className="rounded-2xl border border-[#e6ebe1] p-5 md:p-7 min-w-0">
+                <div className="flex gap-1 border-b border-gray-100 -mx-5 md:-mx-7 px-5 md:px-7 mb-6 overflow-x-auto no-scrollbar" role="tablist">
+                  {TABS.map((t) => (
+                    <button
+                      key={t.id}
+                      role="tab"
+                      aria-selected={tab === t.id}
+                      onClick={() => setTab(t.id)}
+                      className={
+                        "shrink-0 inline-flex items-center gap-2 px-3 pb-3 -mb-px border-b-2 text-sm font-medium transition-colors " +
+                        (tab === t.id ? "border-[#1F5A25] text-[#1F5A25]" : "border-transparent text-gray-500 hover:text-gray-800")
+                      }
+                    >
+                      <t.icon size={16} />
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+
+                {live && tab === "book" && <OrderBook quotes={live.inS} />}
+                {live && tab === "chart" && (
+                  <ChartPanel today={today} history={history} latest={latest} scope={scope} nowTs={lastEventAt} minCount={minCount} />
+                )}
+                {live && tab === "map" && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-4">Чем темнее регион, тем дешевле. Нажмите на регион, чтобы выбрать его.</p>
+                    <RussiaMap stats={live.regionStats} direction={direction} selected={region} onSelect={(id) => selectRegion(region === id ? null : id)} />
+                  </div>
+                )}
+                {live && tab === "regions" && (
+                  <RegionsPanel
+                    regionStats={live.regionStats}
+                    prevCloses={prevCloses}
+                    direction={direction}
+                    selected={region}
+                    onPick={(id) => selectRegion(region === id ? null : id)}
+                  />
+                )}
+              </div>
+
+              <aside className="rounded-2xl border border-[#e6ebe1] p-5 md:p-6">
+                <p className="font-semibold text-gray-900">Последние цены</p>
+                <p className="text-xs text-gray-400 mt-0.5 mb-3">приходят из бота в реальном времени</p>
+                <ul>
+                  {feed.map((q) => {
+                    const bad = q.status !== "accepted";
+                    return (
+                      <li key={q.id} className="relative py-3 border-b border-gray-100 last:border-b-0">
+                        <span className="agr-flash absolute -inset-x-2 inset-y-0 rounded-lg" />
+                        <div className="relative flex items-baseline justify-between gap-2 text-xs text-gray-400">
+                          <span className="truncate">{REGION_BY_ID[q.regionId].name}</span>
+                          <span className="tabular-nums shrink-0">{time(q.at)}</span>
+                        </div>
+                        <div className="relative flex items-baseline justify-between gap-2 mt-0.5">
+                          <span className={"text-sm tabular-nums " + (bad ? "text-gray-400 line-through" : "font-semibold text-gray-900")}>
+                            {rub(q.price)} ₽ · <span className="font-normal text-gray-500">{tons(q.volume)}</span>
+                          </span>
+                          <span className={"text-[11px] shrink-0 " + (bad ? "text-[#c0492f]" : "text-gray-400")}>
+                            {bad
+                              ? q.status === "moderation"
+                                ? "на проверке"
+                                : "не учтено"
+                              : q.revision > 1 && q.prevPrice && q.prevPrice !== q.price
+                                ? `было ${rub(q.prevPrice)}`
+                                : q.revision > 1
+                                  ? "обновлён объём"
+                                  : companyById.get(q.companyId)?.code}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                  {feed.length === 0 && <li className="py-6 text-sm text-gray-400">Сегодня подач пока нет</li>}
+                </ul>
+              </aside>
+            </div>
+
+            {/* Действие */}
+            <div className="mt-8 rounded-2xl bg-[#1F5A25] text-white p-6 md:p-8 flex flex-col md:flex-row md:items-center justify-between gap-5">
+              <div>
+                <p className="text-xl md:text-2xl font-semibold">Нужен объём по этой цене?</p>
+                <p className="text-white/75 mt-1">Соберём партию у производителей и доставим до порта или границы.</p>
+              </div>
+              <button
+                onClick={() => openLead("exporter")}
+                className="shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-white text-[#1F5A25] px-6 py-3 font-semibold hover:bg-[#f3f8ee] transition-colors"
+              >
+                Оставить заявку <ArrowRight size={17} />
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
