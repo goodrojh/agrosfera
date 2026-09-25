@@ -2,19 +2,13 @@
 process.env.DB_PATH = ":memory:";
 
 const { companies } = await import("./db.ts");
-const { handle, bus } = await import("./core.ts");
-const { decideApplication, setApplicationNotifier } = await import("./registration.ts");
+const { handle, bus, beginRound } = await import("./core.ts");
 
 const events: string[] = [];
-bus.on("quote", (q) => events.push(`${q.status}:${q.price}`));
-let lastAppId = "";
-setApplicationNotifier((a, existing) => {
-  lastAppId = a.id;
-  console.log(`[модератору] анкета: ${a.companyName}, ИНН ${a.inn}${existing ? ` (уже есть ${existing.code})` : ""}\n`);
-});
+bus.on("quote", (q) => events.push(`${q.crop}:${q.status}:${q.price}`));
 
-// Рынок: три подтверждённых предприятия в Омской области (по приглашению)
-const peers = ["А", "Б", "В"].map((n) => companies.create({ name: `Хозяйство ${n}`, regionId: "omsk" }));
+// Рынок: три участника в Омской области уже работают
+const peers = ["А", "Б", "В"].map((n) => companies.create({ name: `Хозяйство ${n}`, regionId: "omsk", crops: ["flax"], status: "active" }));
 peers.forEach((p, i) => {
   handle({ channel: "telegram", userId: `peer${i}`, startPayload: p.inviteCode });
   handle({ channel: "telegram", userId: `peer${i}`, text: `${31000 + i * 200} 150` });
@@ -23,30 +17,30 @@ peers.forEach((p, i) => {
 type Msg = Parameters<typeof handle>[0];
 const say = (m: Msg) => {
   for (const out of handle(m)) {
-    const btns = out.buttons?.length ? `\n[${out.buttons.slice(0, 4).map((b) => b.label).join("] [")}${out.buttons.length > 4 ? "] …" : "]"}` : "";
+    const btns = out.buttons?.length ? `\n[${out.buttons.map((b) => b.label).join("] [")}]` : "";
     console.log(`> ${m.text ?? m.button ?? m.phone ?? m.startPayload}\n${out.text}${btns}${out.requestContact ? "\n[📱 Отправить номер]" : ""}\n`);
   }
 };
 const u = { channel: "telegram" as const, userId: "new", userName: "Иван Петров", userHandle: "@ivan" };
 
-console.log("=== Неподтверждённый пользователь пытается прислать цену ===");
-say({ ...u, text: "30 150" });
-console.log("=== Анкета ===");
-say({ ...u, button: "reg:start" });
-say({ ...u, text: "ООО «Тестовый Лён»" });
-say({ ...u, text: "7707083894" });
-say({ ...u, text: "7707083893" });
-say({ ...u, button: "reg:region:omsk" });
-say({ ...u, text: "Петров Иван, директор" });
-say({ ...u, phone: "+79131234567" });
-say({ ...u, button: "reg:ok" });
-console.log("=== Пока не подтвердили — цены не принимаются ===");
+console.log("=== Незнакомый пользователь пишет в бот ===");
 say({ ...u, text: "31500 200" });
-console.log("=== Модератор подтверждает ===");
-console.log(decideApplication(lastAppId, true)?.message.text, "\n");
-console.log("=== Теперь предприятие присылает цену ===");
+
+console.log("=== Анкета с сайта: карточка «новая» ===");
+const card = companies.create({ name: "ООО «Тестовый Лён»", inn: "7707083893", regionId: "omsk", status: "new", crops: ["flax"], person: "Петров Иван", phone: "+7 913 123-45-67", source: "site" });
+say({ ...u, phone: "89131234567" });
+
+console.log("=== Менеджер поговорил, закрепил лён и подсолнечник, поставил галочку «Доступ открыт» ===");
+companies.update(card.id, { status: "active", crops: ["flax", "sunflower"] });
+say({ ...u, phone: "89131234567" });
 say({ ...u, text: "30 150" });
 say({ ...u, button: "b:confirm" });
+say({ ...u, text: "нет" });
+
+console.log("=== Утро следующего дня: бот сам присылает запрос ===");
+for (const out of beginRound("telegram", "new", companies.get(card.id)!)) console.log(`${out.text}\n`);
+say({ ...u, text: "31200 180" });
+say({ ...u, text: "38500 300" });
 say({ ...u, text: "/status" });
 console.log("События для сайта:", events.join(", "));
 export {};

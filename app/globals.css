@@ -88,6 +88,14 @@ body {
   scrollbar-color: #d7dfd0 transparent;
 }
 
+@keyframes agr-fade {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.agr-fade {
+  animation: agr-fade 0.35s ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .agr-flash, .agr-flash-ask { animation: none; }
   .agr-pulse, .agr-ping { animation: none; }

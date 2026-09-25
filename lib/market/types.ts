@@ -1,4 +1,5 @@
 import type { RegionId } from "./regions";
+import type { CropId } from "./crops";
 
 /** Публичное (анонимизированное) представление предприятия */
 export interface Company {
@@ -13,6 +14,8 @@ export type QuoteStatus = "accepted" | "moderation" | "rejected";
 /** Одна подача цены из бота. Повторная подача за день — новая ревизия. */
 export interface Quote {
   id: string;
+  /** Культура; у старых записей — лён */
+  crop?: CropId;
   companyId: string;
   regionId: RegionId;
   /** ₽/т с НДС, EXW склад предприятия */
@@ -46,6 +49,7 @@ export const BUYER_LABEL: Record<BuyerType, string> = { exporter: "экспор�
 /** Заявка покупателя в стакане. Контакты наружу не отдаются. */
 export interface Bid {
   id: string;
+  crop?: CropId;
   /** ₽/т с НДС, EXW */
   price: number;
   /** Сколько тонн хотят купить */

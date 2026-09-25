@@ -125,16 +125,39 @@ export default function MarketProvider({ children }: { children: React.ReactNode
     if (cropRef.current === c) setActive(next);
   }, []);
 
+  /** Загрузить снимок рынка культуры с сервера */
+  const loadLive = useCallback(async (c: CropId) => {
+    try {
+      const res = await fetch(`${API_URL}/api/snapshot?crop=${c}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const snap = await res.json();
+      const st: CropStore = {
+        demo: null,
+        companies: snap.companies,
+        history: snap.history,
+        today: snap.today,
+        bids: snap.bids ?? [],
+        lastEventAt: Math.max(0, ...snap.today.map((q: Quote) => q.at)),
+      };
+      stores.current.set(c, st);
+      if (cropRef.current === c) setActive(st);
+      setReady(true);
+    } catch {
+      setConnected(false);
+    }
+  }, []);
+
   const setCrop = useCallback(
     (c: CropId) => {
       cropRef.current = c;
       setCropState(c);
       if (!stores.current.has(c)) {
         stores.current.set(c, mode === "demo" ? makeDemoStore(c, Date.now()) : EMPTY);
+        if (mode === "live") void loadLive(c);
       }
       setActive(stores.current.get(c)!);
     },
-    [mode]
+    [mode, loadLive]
   );
 
   // Демо-режим: данные создаются только в браузере (зависят от текущего времени)
@@ -165,52 +188,35 @@ export default function MarketProvider({ children }: { children: React.ReactNode
   }, [mode, pushTo, pushBid]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // Боевой режим: снимок + поток событий с сервера бота (пока только лён)
+  // Боевой режим: снимок выбранной культуры + поток событий с сервера бота по всем культурам
   useEffect(() => {
     if (mode !== "live") return;
     let closed = false;
     let es: EventSource | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
+    // Событие относится к культуре из поля crop (у старых записей — лён); загруженные культуры обновляем
+    const cropOf = (x: { crop?: CropId }) => x.crop ?? "flax";
 
-    const load = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/snapshot`, { cache: "no-store" });
-        if (!res.ok) throw new Error(String(res.status));
-        const snap = await res.json();
-        if (closed) return;
-        const st: CropStore = {
-          demo: null,
-          companies: snap.companies,
-          history: snap.history,
-          today: snap.today,
-          bids: snap.bids ?? [],
-          lastEventAt: Math.max(0, ...snap.today.map((q: Quote) => q.at)),
-        };
-        stores.current.set("flax", st);
-        if (cropRef.current === "flax") setActive(st);
-        setReady(true);
-      } catch {
-        setConnected(false);
-      }
-    };
-
-    load().then(() => {
+    loadLive(cropRef.current).then(() => {
       if (closed) return;
       es = new EventSource(`${API_URL}/api/stream`);
       es.addEventListener("open", () => setConnected(true));
       es.addEventListener("error", () => setConnected(false));
-      es.addEventListener("quote", (e) => pushTo("flax", JSON.parse((e as MessageEvent).data)));
-      es.addEventListener("bid", (e) => pushBid("flax", JSON.parse((e as MessageEvent).data)));
-      es.addEventListener("company", (e) => {
-        const c: Company = JSON.parse((e as MessageEvent).data);
-        const st = stores.current.get("flax");
-        if (!st) return;
-        const next = { ...st, companies: [...st.companies.filter((x) => x.id !== c.id), c] };
-        stores.current.set("flax", next);
-        if (cropRef.current === "flax") setActive(next);
+      es.addEventListener("quote", (e) => {
+        const q: Quote = JSON.parse((e as MessageEvent).data);
+        pushTo(cropOf(q), q);
       });
-      es.addEventListener("reset", () => load());
-      poll = setInterval(load, 60_000);
+      es.addEventListener("bid", (e) => {
+        const b: Bid = JSON.parse((e as MessageEvent).data);
+        pushBid(cropOf(b), b);
+      });
+      // Новый участник или изменения — перечитываем выбранную культуру
+      es.addEventListener("company", () => void loadLive(cropRef.current));
+      es.addEventListener("reset", () => {
+        for (const c of [...stores.current.keys()]) if (c !== cropRef.current) stores.current.delete(c);
+        void loadLive(cropRef.current);
+      });
+      poll = setInterval(() => void loadLive(cropRef.current), 60_000);
     });
 
     return () => {
@@ -218,7 +224,7 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       es?.close();
       if (poll) clearInterval(poll);
     };
-  }, [mode, pushTo, pushBid]);
+  }, [mode, pushTo, pushBid, loadLive]);
 
   const submitBid = useCallback(
     async (input: BidInput): Promise<string | null> => {
@@ -309,7 +315,8 @@ export default function MarketProvider({ children }: { children: React.ReactNode
 
   const companyById = useMemo(() => new Map(active.companies.map((c) => [c.id, c])), [active.companies]);
   const latest = useMemo(() => latestAccepted(active.today), [active.today]);
-  const supported = mode === "demo" || crop === "flax";
+  // Сервер собирает цены по всем культурам: если участников ещё нет — окно покажет пустой стакан
+  const supported = true;
 
   const value = useMemo<MarketValue>(
     () => ({

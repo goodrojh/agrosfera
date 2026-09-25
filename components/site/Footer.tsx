@@ -4,7 +4,9 @@ import React, { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { API_URL, asset, CONTACT_EMAIL, MAX_BOT_URL, TELEGRAM_BOT_URL } from "@/lib/config";
 import { LEAD_EVENT, type LeadRole } from "@/lib/lead";
-import { DIRECTIONS, REGIONS } from "@/lib/market/regions";
+import { DIRECTIONS, REGIONS, type RegionId } from "@/lib/market/regions";
+import { CROPS, type CropId } from "@/lib/market/crops";
+import { isValidInn } from "@/lib/market/inn";
 
 const ROLES: { id: LeadRole; label: string }[] = [
   { id: "exporter", label: "Экспортёр" },
@@ -19,6 +21,16 @@ const inputCls =
 export default function Footer({ className, withForm = true }: { className?: string; withForm?: boolean }) {
   const [role, setRole] = useState<LeadRole>("exporter");
   const [form, setForm] = useState({ name: "", contact: "", target: "china", volume: "", comment: "" });
+  // Анкета производителя: после проверки менеджером открывается доступ к боту
+  const [prod, setProd] = useState<{ name: string; inn: string; regionId: RegionId; crops: CropId[]; person: string; phone: string; comment: string }>({
+    name: "",
+    inn: "",
+    regionId: "omsk",
+    crops: ["flax"],
+    person: "",
+    phone: "",
+    comment: "",
+  });
   const [state, setState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [error, setError] = useState("");
 
@@ -39,8 +51,32 @@ export default function Footer({ className, withForm = true }: { className?: str
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const submitProducer = async () => {
+    if (prod.name.trim().length < 3) return setError("Укажите название предприятия.");
+    if (!isValidInn(prod.inn)) return setError("ИНН не проходит проверку контрольной суммы — проверьте цифры.");
+    if (prod.person.trim().length < 3) return setError("Укажите контактное лицо.");
+    if (prod.phone.replace(/\D/g, "").length < 10) return setError("Укажите телефон — по нему бот узнает вас после подтверждения.");
+    setError("");
+    setState("sending");
+    if (!API_URL) {
+      await new Promise((r) => setTimeout(r, 600));
+      setState("done");
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(prod) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Не удалось отправить");
+      setState("done");
+    } catch (err) {
+      setState("error");
+      setError((err as Error).message);
+    }
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (role === "producer") return submitProducer();
     if (form.name.trim().length < 2 || form.contact.trim().length < 5) {
       setError("Укажите имя или компанию и телефон / Telegram.");
       return;
@@ -87,7 +123,7 @@ export default function Footer({ className, withForm = true }: { className?: str
           <div>
             <h2 className="text-white font-bold text-[28px] md:text-[34px] leading-[1.2] max-w-[360px] mb-4">Оставить заявку</h2>
             <p className="text-[#9aab98] text-[15px] leading-relaxed max-w-[380px]">
-              Экспортёру — подберём объём и рассчитаем цену с доставкой. Агенту — пришлём договор. Производителю — подключим к боту.
+              Экспортёру — подберём объём и рассчитаем цену с доставкой. Агенту — пришлём договор. Производителю — проверим анкету, созвонимся и откроем доступ к боту котировок.
             </p>
           </div>
 
@@ -99,12 +135,19 @@ export default function Footer({ className, withForm = true }: { className?: str
                 animate={{ opacity: 1, y: 0 }}
                 className="rounded-2xl border border-[#8CC152]/30 bg-[#8CC152]/10 p-6 md:p-8 text-white"
               >
-                <p className="text-xl font-semibold mb-2">✓ Заявка принята</p>
+                <p className="text-xl font-semibold mb-2">✓ {role === "producer" ? "Анкета отправлена" : "Заявка принята"}</p>
                 <p className="text-[#b9c8b6] text-sm leading-relaxed">
-                  {API_URL
-                    ? "Менеджер свяжется с вами в рабочее время."
-                    : "Сейчас сайт работает в демо-режиме: заявка не отправлена. После подключения сервера заявки будут приходить менеджеру в Telegram."}
+                  {!API_URL
+                    ? "Сейчас сайт работает в демо-режиме: заявка не отправлена. После подключения сервера заявки будут попадать в панель управления."
+                    : role === "producer"
+                      ? "Менеджер проверит предприятие, позвонит, уточнит культуры и откроет доступ. После этого откройте бота в Telegram и нажмите «Отправить номер» — бот узнает вас по телефону из анкеты."
+                      : "Менеджер свяжется с вами в рабочее время."}
                 </p>
+                {role === "producer" && TELEGRAM_BOT_URL && (
+                  <a href={TELEGRAM_BOT_URL} className="mt-4 mr-5 inline-block rounded-lg bg-[#8CC152] text-[#0d2410] px-4 py-2 text-sm font-semibold">
+                    Открыть бота
+                  </a>
+                )}
                 <button onClick={() => setState("idle")} className="mt-5 text-sm text-[#C3E79A] hover:text-white transition-colors">
                   Отправить ещё одну →
                 </button>
@@ -129,38 +172,86 @@ export default function Footer({ className, withForm = true }: { className?: str
                     </button>
                   ))}
                 </div>
+                {role === "producer" ? (
+                  <>
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <input className={inputCls} placeholder="Название предприятия" value={prod.name} onChange={(e) => setProd((p) => ({ ...p, name: e.target.value }))} />
+                      <input
+                        className={inputCls}
+                        placeholder="ИНН (10 или 12 цифр)"
+                        inputMode="numeric"
+                        value={prod.inn}
+                        onChange={(e) => setProd((p) => ({ ...p, inn: e.target.value.replace(/\D/g, "").slice(0, 12) }))}
+                      />
+                      <select className={inputCls} value={prod.regionId} onChange={(e) => setProd((p) => ({ ...p, regionId: e.target.value as RegionId }))}>
+                        {REGIONS.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            Склад: {r.name}
+                          </option>
+                        ))}
+                      </select>
+                      <input className={inputCls} placeholder="Контактное лицо, должность" value={prod.person} onChange={(e) => setProd((p) => ({ ...p, person: e.target.value }))} />
+                      <input className={inputCls + " sm:col-span-2"} placeholder="Телефон (по нему бот узнает вас)" inputMode="tel" value={prod.phone} onChange={(e) => setProd((p) => ({ ...p, phone: e.target.value }))} />
+                    </div>
+                    <div>
+                      <p className="text-[13px] text-[#9aab98] mb-2">Какие культуры продаёте</p>
+                      <div className="flex flex-wrap gap-2">
+                        {CROPS.map((c) => {
+                          const on = prod.crops.includes(c.id);
+                          return (
+                            <button
+                              type="button"
+                              key={c.id}
+                              onClick={() => setProd((p) => ({ ...p, crops: on ? p.crops.filter((x) => x !== c.id) : [...p.crops, c.id] }))}
+                              className={
+                                "rounded-full px-3 py-1.5 text-sm border transition-colors " +
+                                (on ? "bg-[#8CC152] border-[#8CC152] text-[#0d2410] font-medium" : "border-[#2c4131] text-[#9aab98] hover:text-white")
+                              }
+                            >
+                              {c.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <textarea
+                      className={inputCls + " resize-none"}
+                      rows={2}
+                      placeholder="Объёмы, условия, удобное время для звонка (необязательно)"
+                      value={prod.comment}
+                      onChange={(e) => setProd((p) => ({ ...p, comment: e.target.value }))}
+                    />
+                  </>
+                ) : (
+                <>
                 <div className="grid sm:grid-cols-2 gap-3">
                   <input className={inputCls} placeholder="Имя или компания" value={form.name} onChange={set("name")} />
                   <input className={inputCls} placeholder="Телефон или @telegram" value={form.contact} onChange={set("contact")} />
                   <select className={inputCls} value={form.target} onChange={set("target")}>
-                    {role === "producer"
-                      ? REGIONS.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.name}
-                          </option>
-                        ))
-                      : DIRECTIONS.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            Направление: {d.name}
-                          </option>
-                        ))}
+                    {DIRECTIONS.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        Направление: {d.name}
+                      </option>
+                    ))}
                   </select>
                   <input
                     className={inputCls}
-                    placeholder={role === "producer" ? "Объём к продаже, т" : "Нужный объём, т"}
+                    placeholder="Нужный объём, т"
                     inputMode="numeric"
                     value={form.volume}
                     onChange={(e) => setForm((f) => ({ ...f, volume: e.target.value.replace(/\D/g, "") }))}
                   />
                 </div>
                 <textarea className={inputCls + " resize-none"} rows={2} placeholder="Комментарий (необязательно)" value={form.comment} onChange={set("comment")} />
+                </>
+                )}
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-1">
                   <button
                     type="submit"
                     disabled={state === "sending"}
                     className="w-full sm:w-auto px-7 py-3.5 rounded-[10px] text-[#0d2410] text-[14px] font-bold transition-all cursor-pointer whitespace-nowrap bg-[#8CC152] hover:bg-[#9fd065] disabled:opacity-60"
                   >
-                    {state === "sending" ? "Отправляем…" : "Отправить заявку"}
+                    {state === "sending" ? "Отправляем…" : role === "producer" ? "Отправить анкету" : "Отправить заявку"}
                   </button>
                   <p className="text-[11px] text-[#6f806f] leading-snug">Нажимая кнопку, вы соглашаетесь на обработку персональных данных.</p>
                 </div>

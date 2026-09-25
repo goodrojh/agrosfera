@@ -16,6 +16,10 @@ export const config = {
   maxToken: env("MAX_BOT_TOKEN"),
   maxUsername: env("MAX_BOT_USERNAME"),
   reminderHour: Number(env("REMINDER_HOUR", "9")),
+  /** Пароль панели управления /admin */
+  adminPassword: env("ADMIN_PASSWORD"),
+  /** Адрес сайта — для ссылок на анкету */
+  siteUrl: env("SITE_URL", "https://goodrojh.github.io/agrosfera").replace(/\/$/, ""),
 };
 
 /** Рабочий день считаем по Москве */

@@ -1,8 +1,9 @@
 import { config, mskDay, mskHour } from "./config.ts";
-import { companies, members, quotes, reminders } from "./db.ts";
+import { companies, members, reminders } from "./db.ts";
 import { startApi } from "./api.ts";
-import { sendTelegram, startTelegram } from "./telegram.ts";
-import { sendMax, startMax } from "./max.ts";
+import { startTelegram } from "./telegram.ts";
+import { startMax } from "./max.ts";
+import { beginRound, senders } from "./core.ts";
 
 startApi();
 
@@ -12,18 +13,18 @@ else console.log("Telegram: TELEGRAM_BOT_TOKEN не задан — бот не �
 if (config.maxToken) startMax();
 else console.log("MAX: MAX_BOT_TOKEN не задан — бот не запущен");
 
-// Утреннее напоминание тем, кто ещё не прислал цену (пн–сб)
-setInterval(() => {
+if (!config.adminPassword) console.log("Панель управления: задайте ADMIN_PASSWORD в .env, чтобы войти");
+
+// Утренний запрос цен (пн–сб): каждому участнику с открытым доступом — по закреплённым культурам
+setInterval(async () => {
   const now = Date.now();
   const weekday = new Date(now).getUTCDay();
   if (weekday === 0 || mskHour(now) !== config.reminderHour) return;
   const day = mskDay(now);
-  const submitted = new Set(quotes.ofDay(day).filter((q) => q.status === "accepted").map((q) => q.companyId));
   for (const c of companies.list()) {
-    if (!c.active || submitted.has(c.id) || !reminders.claim(day, c.id)) continue;
+    if (!c.active || !c.crops.length || !reminders.claim(day, c.id)) continue;
     for (const m of members.ofCompany(c.id)) {
-      const text = "Доброе утро! Пришлите, пожалуйста, цену и свободный объём масличного льна на сегодня.\nФормат: ЦЕНА ОБЪЁМ, например 31500 200";
-      void (m.channel === "telegram" ? sendTelegram(m.userId, text) : sendMax(m.userId, text));
+      for (const out of beginRound(m.channel, m.userId, c)) await senders[m.channel]?.(m.userId, out);
     }
   }
 }, 60_000);

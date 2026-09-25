@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowDownRight, ArrowUpRight, Map as MapIcon, Minus, Plus, X } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, BookOpen, Map as MapIcon, Minus, Plus, X } from "lucide-react";
 import { useMarket } from "@/components/market/MarketProvider";
 import PriceChart from "@/components/market/PriceChart";
 import RussiaMap from "@/components/market/RussiaMap";
@@ -10,12 +10,12 @@ import RegionPicker from "@/components/market/RegionPicker";
 import OrderBook from "@/components/market/OrderBook";
 import BidDialog from "@/components/market/BidDialog";
 import DealDialog from "@/components/market/DealDialog";
+import GuideDialog from "@/components/market/GuideDialog";
 import { computeIndex, dailySeries, inScope, intradaySeries, lastHistoryDay, type IndexStats, type Scope } from "@/lib/market/aggregate";
 import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
 import { REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
 import { ago, pct, rub } from "@/lib/market/format";
 import type { DailyClose, Quote } from "@/lib/market/types";
-import { TELEGRAM_BOT_URL } from "@/lib/config";
 
 const PERIODS = [
   { id: "day", label: "День", days: 1 },
@@ -176,6 +176,8 @@ export default function Terminal() {
   const closeBid = useCallback(() => setBidDraft(null), []);
   const [deal, setDeal] = useState<{ side: "buy" | "sell"; price: number; volume?: number } | null>(null);
   const closeDeal = useCallback(() => setDeal(null), []);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const closeGuide = useCallback(() => setGuideOpen(false), []);
 
   const scope = useMemo<Scope>(() => ({ direction: "all", region: null, regions }), [regions]);
   const cropInfo = CROP_BY_ID[crop];
@@ -215,13 +217,22 @@ export default function Terminal() {
   const bestAsk = live?.inS.length ? Math.min(...live.inS.map((q) => q.price)) : undefined;
   const bestBid = scopedBids.length ? Math.max(...scopedBids.map((b) => b.price)) : undefined;
   const minCount = regions.length ? 1 : Math.max(3, Math.round((live?.total ?? 0) * 0.35));
-  const producerHref = TELEGRAM_BOT_URL || "/sotrudnichestvo/#bot";
+  // Производитель попадает в бот только после анкеты и проверки менеджером
+  const producerHref = "/sotrudnichestvo/?role=producer#zayavka";
 
   return (
     <section id="terminal" className="bg-white py-6 md:py-8 px-4 md:px-8 scroll-mt-0">
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-          <h2 className="text-[28px] md:text-[34px] font-semibold tracking-tight text-[#111] leading-none">Котировки</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-[28px] md:text-[34px] font-semibold tracking-tight text-[#111] leading-none">Котировки</h2>
+            <button
+              onClick={() => setGuideOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[#1F5A25]/25 bg-[#f3f8ee] px-3.5 py-1.5 text-sm font-semibold text-[#1F5A25] hover:bg-[#e6f0dc] transition-colors"
+            >
+              <BookOpen size={15} /> Инструкция
+            </button>
+          </div>
           <div className="flex items-center gap-2 text-xs">
             {mode === "demo" && <span className="rounded-full bg-amber-50 text-amber-800 px-3 py-1 font-medium">демо-данные</span>}
             <span className="inline-flex items-center gap-2 rounded-full bg-[#f3f8ee] text-[#1F5A25] px-3 py-1 font-medium">
@@ -247,7 +258,6 @@ export default function Terminal() {
                   }
                 >
                   {c.name}
-                  {mode === "live" && !c.live && <span className="ml-1.5 text-[11px] opacity-60">скоро</span>}
                 </button>
               );
             })}
@@ -323,7 +333,7 @@ export default function Terminal() {
                   <p className="mt-2 text-[11px] text-gray-400 text-center">
                     Нажмите на любую цену в стакане — сделку проведём через АгроСферу ·{" "}
                     <Link href={producerHref} className="text-gray-500 underline underline-offset-2 hover:text-gray-800">
-                      подать цену предприятия в бот
+                      предприятию: подать анкету
                     </Link>
                   </p>
                 </div>
@@ -344,6 +354,7 @@ export default function Terminal() {
           onClose={closeMap}
         />
       )}
+      {guideOpen && <GuideDialog onClose={closeGuide} />}
       {deal && live && (
         <DealDialog
           side={deal.side}
