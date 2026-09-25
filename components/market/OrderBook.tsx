@@ -9,11 +9,10 @@ interface Level {
   price: number;
   volume: number;
   count: number;
-  cumulative: number;
   regions: { id: RegionId; volume: number }[];
 }
 
-const GRID = "grid grid-cols-[1.4fr_1.1fr_0.9fr] gap-3";
+const GRID = "grid grid-cols-[1.5fr_1fr] gap-4";
 
 const Row = memo(function Row({ l, best, inFill, maxLevel }: { l: Level; best: boolean; inFill: boolean; maxLevel: number }) {
   const regions =
@@ -45,7 +44,6 @@ const Row = memo(function Row({ l, best, inFill, maxLevel }: { l: Level; best: b
         />
         <span className="relative pr-1.5">{rub(l.volume)} т</span>
       </span>
-      <span className="relative text-right text-sm tabular-nums text-gray-500">{rub(l.cumulative)}</span>
     </div>
   );
 });
@@ -64,14 +62,11 @@ export default function OrderBook({ quotes }: { quotes: Quote[] }) {
       l.regions.set(q.regionId, (l.regions.get(q.regionId) ?? 0) + q.volume);
     }
     const out: Level[] = [];
-    let cum = 0;
     for (const [price, l] of [...map.entries()].sort((a, b) => a[0] - b[0])) {
-      cum += l.volume;
       out.push({
         price,
         volume: l.volume,
         count: l.count,
-        cumulative: cum,
         regions: [...l.regions.entries()].map(([id, volume]) => ({ id, volume })).sort((a, b) => b.volume - a.volume),
       });
     }
@@ -139,7 +134,6 @@ export default function OrderBook({ quotes }: { quotes: Quote[] }) {
       <div className={`${GRID} px-3 pt-4 pb-1.5 text-[11px] text-gray-400`}>
         <span>Цена, ₽/т</span>
         <span className="text-right">Объём</span>
-        <span className="text-right">Накоплено</span>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto max-h-[420px] agr-scroll">
         {levels.map((l, i) => (

@@ -9,7 +9,7 @@ import RegionPicker from "@/components/market/RegionPicker";
 import OrderBook from "@/components/market/OrderBook";
 import { computeIndex, dailySeries, inScope, intradaySeries, lastHistoryDay, type IndexStats, type Scope } from "@/lib/market/aggregate";
 import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
-import { REGIONS, type RegionId } from "@/lib/market/regions";
+import { REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
 import { ago, pct, rub, tons } from "@/lib/market/format";
 import type { DailyClose, Quote } from "@/lib/market/types";
 import { openLead } from "@/lib/lead";
@@ -87,24 +87,27 @@ function ChartPanel({
         </div>
       </div>
       <div className="flex-1 min-h-[300px] mt-4">
-        <PriceChart points={series} kind={period === "day" ? "intraday" : "daily"} animKey={`${period}-${scope.region}`} />
+        <PriceChart points={series} kind={period === "day" ? "intraday" : "daily"} animKey={`${period}-${(scope.regions ?? []).join(",")}`} />
       </div>
     </div>
   );
 }
 
-/** Карта во всплывающем окне: открыли — выбрали регион — закрылось */
+/** Карта во всплывающем окне: отмечаете несколько регионов и нажимаете «Применить» */
 function MapDialog({
   stats,
-  selected,
-  onSelect,
+  initial,
+  onApply,
   onClose,
 }: {
   stats: Map<RegionId, IndexStats>;
-  selected: RegionId | null;
-  onSelect: (id: RegionId) => void;
+  initial: RegionId[];
+  onApply: (ids: RegionId[]) => void;
   onClose: () => void;
 }) {
+  const [draft, setDraft] = useState<RegionId[]>(initial);
+  const toggle = useCallback((id: RegionId) => setDraft((d) => (d.includes(id) ? d.filter((x) => x !== id) : [...d, id])), []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
@@ -117,18 +120,57 @@ function MapDialog({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40" onClick={onClose} role="dialog" aria-modal="true" aria-label="Выбор региона на карте">
-      <div className="w-full max-w-4xl rounded-2xl bg-white p-5 md:p-7 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Выбор регионов на карте"
+    >
+      <div className="w-full max-w-5xl max-h-full overflow-y-auto rounded-2xl bg-white p-5 md:p-7 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
-            <p className="text-lg font-semibold text-gray-900">Выберите регион</p>
-            <p className="text-sm text-gray-500">Чем темнее, тем дешевле. Серые — нет производителей этой культуры.</p>
+            <p className="text-lg font-semibold text-gray-900">Выберите регионы</p>
+            <p className="text-sm text-gray-500">Нажимайте на регионы, чтобы отметить несколько. Чем темнее, тем дешевле; серые — нет производителей.</p>
           </div>
-          <button onClick={onClose} aria-label="Закрыть" className="w-9 h-9 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100">
+          <button onClick={onClose} aria-label="Закрыть" className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100">
             <X size={18} />
           </button>
         </div>
-        <RussiaMap stats={stats} direction="all" selected={selected} onSelect={onSelect} />
+
+        <RussiaMap stats={stats} selected={draft} onToggle={toggle} />
+
+        <div className="mt-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-t border-gray-100 pt-4">
+          <div className="flex flex-wrap gap-2 min-h-[32px] items-center">
+            {draft.length === 0 && <span className="text-sm text-gray-400">Ничего не выбрано — будут показаны все регионы</span>}
+            {draft.map((id) => (
+              <button
+                key={id}
+                onClick={() => toggle(id)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-[#f3f8ee] text-[#1F5A25] px-3 py-1 text-sm hover:bg-[#e6f0dc]"
+              >
+                {REGION_BY_ID[id].name}
+                <X size={13} />
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {draft.length > 0 && (
+              <button onClick={() => setDraft([])} className="px-3 py-2.5 text-sm text-gray-500 hover:text-gray-800">
+                Сбросить
+              </button>
+            )}
+            <button onClick={onClose} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              Отмена
+            </button>
+            <button
+              onClick={() => onApply(draft)}
+              className="rounded-xl bg-[#1F5A25] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[#174a1c]"
+            >
+              Применить{draft.length ? ` (${draft.length})` : ""}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -136,11 +178,11 @@ function MapDialog({
 
 export default function Terminal() {
   const { ready, mode, crop, setCrop, supported, companies, today, history, latest, lastEventAt } = useMarket();
-  const [region, setRegion] = useState<RegionId | null>(null);
+  const [regions, setRegions] = useState<RegionId[]>([]);
   const [mapOpen, setMapOpen] = useState(false);
   const closeMap = useCallback(() => setMapOpen(false), []);
 
-  const scope = useMemo<Scope>(() => ({ direction: "all", region }), [region]);
+  const scope = useMemo<Scope>(() => ({ direction: "all", region: null, regions }), [regions]);
   const cropInfo = CROP_BY_ID[crop];
 
   const prevCloses = useMemo(() => {
@@ -165,11 +207,12 @@ export default function Terminal() {
 
   const chooseCrop = (c: CropId) => {
     setCrop(c);
-    if (region && !CROP_BY_ID[c].regions.includes(region)) setRegion(null);
+    // Регионы, где новой культуры нет, из выбора убираем
+    setRegions((prev) => prev.filter((r) => CROP_BY_ID[c].regions.includes(r)));
   };
 
   const s = live?.stats;
-  const minCount = region ? 1 : Math.max(3, Math.round((live?.total ?? 0) * 0.35));
+  const minCount = regions.length ? 1 : Math.max(3, Math.round((live?.total ?? 0) * 0.35));
 
   return (
     <section id="terminal" className="bg-white py-16 md:py-24 px-4 md:px-8 scroll-mt-4">
@@ -226,7 +269,7 @@ export default function Terminal() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 md:px-6 py-4 border-b border-gray-100">
                     <p className="text-lg font-semibold text-gray-900">{cropInfo.name}</p>
                     <div className="flex items-center gap-2">
-                      <RegionPicker value={region} onChange={setRegion} stats={live?.regionStats ?? new Map()} available={cropInfo.regions} />
+                      <RegionPicker value={regions} onChange={setRegions} stats={live?.regionStats ?? new Map()} available={cropInfo.regions} />
                       <button
                         onClick={() => setMapOpen(true)}
                         className="shrink-0 inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3.5 py-2.5 text-sm font-medium text-gray-700 hover:border-[#1F5A25]/40 hover:text-[#1F5A25] transition-colors"
@@ -275,9 +318,9 @@ export default function Terminal() {
       {mapOpen && live && (
         <MapDialog
           stats={live.regionStats}
-          selected={region}
-          onSelect={(id) => {
-            setRegion(id);
+          initial={regions}
+          onApply={(ids) => {
+            setRegions(ids);
             setMapOpen(false);
           }}
           onClose={closeMap}

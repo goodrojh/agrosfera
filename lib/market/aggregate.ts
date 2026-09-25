@@ -7,6 +7,8 @@ import type { DailyClose, Quote } from "./types";
 export interface Scope {
   direction: DirectionId | "all";
   region: RegionId | null;
+  /** Несколько выбранных регионов (приоритетнее region и direction) */
+  regions?: RegionId[];
 }
 
 export interface IndexStats {
@@ -71,6 +73,7 @@ export function computeIndex(points: { price: number; volume: number }[]): Index
 }
 
 export function inScope(regionId: RegionId, scope: Scope): boolean {
+  if (scope.regions?.length) return scope.regions.includes(regionId);
   if (scope.region) return regionId === scope.region;
   if (scope.direction === "all") return true;
   return REGION_BY_ID[regionId].directions.includes(scope.direction);

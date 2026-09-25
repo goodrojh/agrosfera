@@ -1,5 +1,8 @@
 // Сборка контуров карты России для сайта: node scripts/build-map.mjs
-// Источник границ: codeforgermany/click_that_hood (public/data/russia.geojson), упрощено mapshaper (6%).
+// Источники границ:
+//   - codeforgermany/click_that_hood, public/data/russia.geojson (83 субъекта);
+//   - geoBoundaries UKR ADM1 (ODbL): Республика Крым, Севастополь, ДНР, ЛНР, Запорожская и Херсонская области.
+// Объединены и упрощены: mapshaper merged.geojson -simplify 6% keep-shapes -clean snap-interval=0.02
 import { readFileSync, writeFileSync } from "node:fs";
 import { geoArea, geoConicEqualArea, geoPath } from "d3-geo";
 

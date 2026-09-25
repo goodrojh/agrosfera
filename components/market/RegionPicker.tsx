@@ -3,17 +3,34 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, MapPin, X } from "lucide-react";
 import type { IndexStats } from "@/lib/market/aggregate";
-import { REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
+import { REGIONS, REGION_BY_ID, shortRegionName, type RegionId } from "@/lib/market/regions";
 import { rub } from "@/lib/market/format";
 
+export function plural(n: number, forms: [string, string, string]): string {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return forms[0];
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return forms[1];
+  return forms[2];
+}
+
+/** Подпись выбранных регионов: «Все регионы», «Омская обл.», «3 региона: Омская, Алтайский…» */
+export function regionsLabel(ids: RegionId[]): string {
+  if (ids.length === 0) return "Все регионы";
+  if (ids.length === 1) return REGION_BY_ID[ids[0]].name;
+  const names = ids.slice(0, 2).map(shortRegionName).join(", ");
+  return `${ids.length} ${plural(ids.length, ["регион", "региона", "регионов"])}: ${names}${ids.length > 2 ? "…" : ""}`;
+}
+
+/** Выбор нескольких регионов из списка с поиском */
 export default function RegionPicker({
   value,
   onChange,
   stats,
   available,
 }: {
-  value: RegionId | null;
-  onChange: (id: RegionId | null) => void;
+  value: RegionId[];
+  onChange: (ids: RegionId[]) => void;
   stats: Map<RegionId, IndexStats>;
   /** Регионы, где выращивают выбранную культуру */
   available?: RegionId[];
@@ -34,16 +51,19 @@ export default function RegionPicker({
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, []);
 
-  const choose = (id: RegionId | null) => {
-    onChange(id);
-    setQuery("");
+  const toggle = (id: RegionId) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  const finish = () => {
     setOpen(false);
+    setQuery("");
     inputRef.current?.blur();
   };
 
@@ -57,18 +77,17 @@ export default function RegionPicker({
       setActive((a) => Math.max(a - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (options[active]) choose(options[active].id);
+      if (options[active]) toggle(options[active].id);
     } else if (e.key === "Escape") {
-      setOpen(false);
-      inputRef.current?.blur();
+      finish();
     }
   };
 
   return (
-    <div ref={rootRef} className="relative w-full sm:w-96">
+    <div ref={rootRef} className="relative w-full sm:w-80">
       <div
         className={
-          "flex items-center gap-2 rounded-xl border bg-white px-3 py-2.5 transition-colors " +
+          "flex items-center gap-2 rounded-xl border bg-white px-3 py-2.5 transition-colors cursor-text " +
           (open ? "border-[#1F5A25] ring-2 ring-[#1F5A25]/10" : "border-gray-200 hover:border-gray-300")
         }
         onClick={() => {
@@ -83,8 +102,8 @@ export default function RegionPicker({
           aria-expanded={open}
           aria-controls={listId}
           aria-autocomplete="list"
-          value={open ? query : value ? REGION_BY_ID[value].name : ""}
-          placeholder={value ? REGION_BY_ID[value].name : "Все регионы"}
+          value={open ? query : ""}
+          placeholder={open ? "Найти регион" : regionsLabel(value)}
           onChange={(e) => {
             setQuery(e.target.value);
             setActive(0);
@@ -92,15 +111,17 @@ export default function RegionPicker({
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKey}
-          className="flex-1 min-w-0 bg-transparent text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none"
+          className={
+            "flex-1 min-w-0 bg-transparent text-sm focus:outline-none " + (value.length && !open ? "placeholder:text-gray-900" : "placeholder:text-gray-500")
+          }
         />
-        {value ? (
+        {value.length > 0 ? (
           <button
             type="button"
-            aria-label="Сбросить регион"
+            aria-label="Сбросить регионы"
             onClick={(e) => {
               e.stopPropagation();
-              choose(null);
+              onChange([]);
             }}
             className="w-6 h-6 rounded-full flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-700"
           >
@@ -112,52 +133,52 @@ export default function RegionPicker({
       </div>
 
       {open && (
-        <ul
-          id={listId}
-          role="listbox"
-          className="absolute z-30 mt-2 w-full max-h-80 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl py-1.5"
-        >
-          {!query && (
-            <li
-              role="option"
-              aria-selected={value === null}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                choose(null);
-              }}
-              className="flex items-center justify-between px-3 py-2 text-sm cursor-pointer text-gray-700 hover:bg-gray-50"
+        <div className="absolute z-30 mt-2 w-full rounded-xl border border-gray-200 bg-white shadow-xl">
+          <ul id={listId} role="listbox" aria-multiselectable="true" className="max-h-72 overflow-y-auto py-1.5 agr-scroll">
+            {options.map((r, i) => {
+              const s = stats.get(r.id);
+              const on = value.includes(r.id);
+              return (
+                <li
+                  key={r.id}
+                  role="option"
+                  aria-selected={on}
+                  onMouseEnter={() => setActive(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    toggle(r.id);
+                  }}
+                  className={"flex items-center gap-3 px-3 py-2 cursor-pointer " + (i === active ? "bg-gray-50" : "")}
+                >
+                  <span
+                    className={
+                      "w-4 h-4 shrink-0 rounded border flex items-center justify-center " +
+                      (on ? "bg-[#1F5A25] border-[#1F5A25]" : "border-gray-300 bg-white")
+                    }
+                  >
+                    {on && <Check size={12} className="text-white" strokeWidth={3} />}
+                  </span>
+                  <span className="flex-1 min-w-0 text-sm text-gray-900 truncate">{r.name}</span>
+                  <span className="text-sm font-semibold tabular-nums text-gray-700 shrink-0">{s ? `${rub(s.index)} ₽` : "—"}</span>
+                </li>
+              );
+            })}
+            {options.length === 0 && <li className="px-3 py-3 text-sm text-gray-400">Такого региона нет в базе</li>}
+          </ul>
+          <div className="flex items-center justify-between gap-2 border-t border-gray-100 px-3 py-2">
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => onChange([])} className="text-sm text-gray-500 hover:text-gray-800">
+              Сбросить
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={finish}
+              className="rounded-lg bg-[#1F5A25] text-white px-3.5 py-1.5 text-sm font-semibold hover:bg-[#174a1c]"
             >
-              Все регионы
-              {value === null && <Check size={15} className="text-[#1F5A25]" />}
-            </li>
-          )}
-          {options.map((r, i) => {
-            const s = stats.get(r.id);
-            return (
-              <li
-                key={r.id}
-                role="option"
-                aria-selected={value === r.id}
-                onMouseEnter={() => setActive(i)}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  choose(r.id);
-                }}
-                className={"flex items-center justify-between gap-3 px-3 py-2 cursor-pointer " + (i === active ? "bg-[#f3f8ee]" : "")}
-              >
-                <span className="min-w-0">
-                  <span className="block text-sm text-gray-900 truncate">{r.name}</span>
-                  <span className="block text-[11px] text-gray-400">{r.macro}</span>
-                </span>
-                <span className="flex items-center gap-2 shrink-0">
-                  <span className="text-sm font-semibold tabular-nums text-gray-800">{s ? `${rub(s.index)} ₽` : "—"}</span>
-                  {value === r.id && <Check size={15} className="text-[#1F5A25]" />}
-                </span>
-              </li>
-            );
-          })}
-          {options.length === 0 && <li className="px-3 py-3 text-sm text-gray-400">Такого региона нет в базе</li>}
-        </ul>
+              Готово
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

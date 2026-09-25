@@ -3,7 +3,7 @@
 import React, { memo, useCallback, useMemo, useRef } from "react";
 import mapData from "@/lib/market/russia-map.json";
 import type { IndexStats } from "@/lib/market/aggregate";
-import { MAP_NAME, REGIONS, REGION_BY_ID, type DirectionId, type RegionId } from "@/lib/market/regions";
+import { MAP_NAME, REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
 import { rub, tons } from "@/lib/market/format";
 
 const BY_MAP_NAME = new Map(REGIONS.map((r) => [MAP_NAME[r.id], r.id]));
@@ -25,7 +25,7 @@ const Regions = memo(function Regions({
 }: {
   fills: Map<string, string>;
   dimmed: Set<string>;
-  selected: string | null;
+  selected: string[];
 }) {
   return (
     <>
@@ -45,24 +45,24 @@ const Regions = memo(function Regions({
           />
         );
       })}
-      {/* Обводка выбранного региона поверх соседей */}
-      {selected && (
-        <path d={mapData.regions.find((r) => r.name === selected)?.d} fill="none" stroke="#0f2413" strokeWidth={2.5} pointerEvents="none" />
-      )}
+      {/* Обводка выбранных регионов поверх соседей */}
+      {selected.map((name) => (
+        <path key={name} d={mapData.regions.find((r) => r.name === name)?.d} fill="none" stroke="#0f2413" strokeWidth={2.2} pointerEvents="none" />
+      ))}
     </>
   );
 });
 
 export default function RussiaMap({
   stats,
-  direction,
   selected,
-  onSelect,
+  onToggle,
 }: {
   stats: Map<RegionId, IndexStats>;
-  direction: DirectionId | "all";
-  selected: RegionId | null;
-  onSelect: (id: RegionId) => void;
+  /** Выбранные регионы (можно несколько) */
+  selected: RegionId[];
+  /** Клик по региону: добавить или убрать из выбора */
+  onToggle: (id: RegionId) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
@@ -77,10 +77,12 @@ export default function RussiaMap({
     for (const r of REGIONS) {
       const s = stats.get(r.id);
       f.set(MAP_NAME[r.id], s ? shade(hi > lo ? (s.index - lo) / (hi - lo) : 0.5) : "#dfe5d8");
-      if (!selected && direction !== "all" && !r.directions.includes(direction)) d.add(MAP_NAME[r.id]);
+      // Когда что-то выбрано, остальные регионы приглушаем — выбор видно сразу
+      if (selected.length && !selected.includes(r.id)) d.add(MAP_NAME[r.id]);
     }
     return { fills: f, dimmed: d, min: lo, max: hi };
-  }, [stats, direction, selected]);
+  }, [stats, selected]);
+  const selectedNames = useMemo(() => selected.map((id) => MAP_NAME[id]), [selected]);
 
   const tipHtml = useCallback(
     (name: string) => {
@@ -88,7 +90,7 @@ export default function RussiaMap({
       const s = id ? stats.get(id) : undefined;
       const title = id ? REGION_BY_ID[id].name : name;
       if (s) {
-        return `<p class="font-semibold text-[13px]">${title}</p><p class="tabular-nums mt-0.5"><b>${rub(s.index)} ₽/т</b> · ${tons(s.volume)}</p><p class="text-white/60">${s.count} предпр. · нажмите, чтобы выбрать</p>`;
+        return `<p class="font-semibold text-[13px]">${title}</p><p class="tabular-nums mt-0.5"><b>${rub(s.index)} ₽/т</b> · ${tons(s.volume)}</p><p class="text-white/60">${s.count} предпр. · нажмите, чтобы отметить</p>`;
       }
       return `<p class="font-semibold text-[13px]">${title}</p><p class="text-white/60 mt-0.5">${id ? "сегодня цен ещё нет" : "нет производителей этой культуры"}</p>`;
     },
@@ -120,7 +122,7 @@ export default function RussiaMap({
   const pick = (e: React.SyntheticEvent) => {
     const name = (e.target as Element).getAttribute?.("data-name");
     const id = name ? MAP_NAME_TO_REGION(name) : undefined;
-    if (id) onSelect(id);
+    if (id) onToggle(id);
   };
 
   return (
@@ -146,7 +148,7 @@ export default function RussiaMap({
           }
         }}
       >
-        <Regions fills={fills} dimmed={dimmed} selected={selected ? MAP_NAME[selected] : null} />
+        <Regions fills={fills} dimmed={dimmed} selected={selectedNames} />
       </svg>
 
       <div
