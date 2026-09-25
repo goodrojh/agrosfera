@@ -63,7 +63,7 @@ export default function BidDialog({
       return;
     }
     setState("done");
-    setTimeout(onClose, 1400);
+    setTimeout(onClose, mode === "live" ? 3500 : 1400);
   };
 
   const digits = (v: string) => v.replace(/\D/g, "").slice(0, 6);
@@ -76,8 +76,9 @@ export default function BidDialog({
             <div className="w-12 h-12 rounded-full bg-[#2f7a1f] text-white flex items-center justify-center mx-auto">
               <Check size={24} />
             </div>
-            <p className="mt-4 text-lg font-semibold text-gray-900">Заявка в стакане</p>
+            <p className="mt-4 text-lg font-semibold text-gray-900">{mode === "live" ? "Заявка на проверке" : "Заявка в стакане"}</p>
             <p className="mt-1 text-sm text-gray-500">
+              {mode === "live" ? "Менеджер проверит её и поставит в стакан — обычно в течение часа в рабочее время. " : ""}
               {bestAsk && Number(price) >= bestAsk
                 ? "Ваша цена совпала с ценой продавца — менеджер свяжется с вами для сделки."
                 : "Производители её видят. Мы свяжемся с вами, как найдём объём."}
@@ -144,7 +145,7 @@ export default function BidDialog({
               {state === "sending" ? "Отправляем…" : "Поставить заявку в стакан"}
             </button>
             <p className="mt-3 text-xs text-gray-400 text-center">
-              В стакане видны только цена и объём. Контакты видим только мы.
+              Заявки проверяет менеджер. В стакане видны только цена и объём, контакты — только нам.
               {mode === "demo" && " Сейчас демо-режим: заявка сохраняется только у вас в браузере."}
             </p>
           </form>

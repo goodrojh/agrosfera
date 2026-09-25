@@ -2,8 +2,7 @@
 // Документация: https://dev.max.ru/docs-api — при изменении API сверить эндпоинты ниже.
 
 import { config } from "./config.ts";
-import { handle, type Outgoing } from "./core.ts";
-import type { ButtonId } from "../../lib/market/dialog.ts";
+import { handle, senders, type Outgoing } from "./core.ts";
 
 const BASE = "https://platform-api.max.ru";
 
@@ -19,15 +18,20 @@ async function api<T = unknown>(method: "GET" | "POST", path: string, params: Re
 }
 
 async function send(userId: string, out: Outgoing) {
-  const attachments = out.buttons?.length
-    ? [
-        {
-          type: "inline_keyboard",
-          payload: { buttons: [out.buttons.map((b) => ({ type: "callback", text: b.label, payload: `b:${b.id}` }))] },
-        },
-      ]
-    : undefined;
+  const rows: { type: string; text: string; payload?: string }[][] = [];
+  const perRow = (out.buttons?.length ?? 0) > 2 ? 2 : 3;
+  (out.buttons ?? []).forEach((b, i) => {
+    if (i % perRow === 0) rows.push([]);
+    rows[rows.length - 1].push({ type: "callback", text: b.label, payload: b.id });
+  });
+  // Кнопка «Отправить номер» в MAX
+  if (out.requestContact) rows.push([{ type: "request_contact", text: "📱 Отправить номер" }]);
+  const attachments = rows.length ? [{ type: "inline_keyboard", payload: { buttons: rows } }] : undefined;
   await api("POST", "/messages", { user_id: userId }, { text: out.text, attachments }).catch((e) => console.error(e.message));
+}
+
+async function sendAll(userId: string, outs: Outgoing[]) {
+  for (const out of outs) await send(userId, out);
 }
 
 export let sendMax: (userId: string, text: string) => Promise<void> = async () => {};
@@ -45,6 +49,7 @@ interface MaxUpdate {
 }
 
 export function startMax() {
+  senders.max = send;
   sendMax = (userId, text) => send(userId, { text });
   let marker: number | undefined;
   let stopped = false;
@@ -60,17 +65,15 @@ export function startMax() {
         for (const u of data.updates ?? []) {
           if (u.update_type === "bot_started" && u.user) {
             const userId = String(u.user.user_id);
-            await send(userId, handle({ channel: "max", userId, userName: u.user.name, text: "/start", startPayload: u.payload }));
+            await sendAll(userId, handle({ channel: "max", userId, userName: u.user.name, text: "/start", startPayload: u.payload }));
           } else if (u.update_type === "message_created" && u.message?.sender && u.message.body?.text) {
             const userId = String(u.message.sender.user_id);
-            await send(userId, handle({ channel: "max", userId, userName: u.message.sender.name, text: u.message.body.text }));
+            await sendAll(userId, handle({ channel: "max", userId, userName: u.message.sender.name, text: u.message.body.text }));
           } else if (u.update_type === "message_callback" && u.callback) {
             const userId = String(u.callback.user.user_id);
             await api("POST", "/answers", { callback_id: u.callback.callback_id }, { notification: "✓" }).catch(() => {});
             const payload = u.callback.payload ?? "";
-            if (payload.startsWith("b:")) {
-              await send(userId, handle({ channel: "max", userId, userName: u.callback.user.name, button: payload.slice(2) as ButtonId }));
-            }
+            if (payload) await sendAll(userId, handle({ channel: "max", userId, userName: u.callback.user.name, button: payload }));
           }
         }
       } catch (e) {

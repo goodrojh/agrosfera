@@ -251,7 +251,7 @@ export default function MarketProvider({ children }: { children: React.ReactNode
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return data.error ?? "Не удалось отправить заявку";
-        pushBid(c, { ...data.bid, own: true });
+        // Заявка ждёт проверки модератором и появится в стакане после подтверждения
         return null;
       } catch {
         return "Нет связи с сервером. Попробуйте ещё раз.";

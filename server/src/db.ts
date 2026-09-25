@@ -72,6 +72,22 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'active'
   );
   CREATE TABLE IF NOT EXISTS reminders (day TEXT NOT NULL, company_id TEXT NOT NULL, PRIMARY KEY (day, company_id));
+  CREATE TABLE IF NOT EXISTS applications (
+    id TEXT PRIMARY KEY,
+    channel TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    user_name TEXT,
+    user_handle TEXT,
+    company_name TEXT NOT NULL,
+    inn TEXT NOT NULL,
+    region_id TEXT NOT NULL,
+    person TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    company_id TEXT,
+    created_at INTEGER NOT NULL,
+    decided_at INTEGER
+  );
 `);
 
 // Базы, созданные до появления типа покупателя
@@ -116,6 +132,10 @@ export const companies = {
   },
   byCode(code: string): CompanyRow | undefined {
     const r = db.prepare("SELECT * FROM companies WHERE code = ?").get(code) as Row | undefined;
+    return r && toCompany(r);
+  },
+  byInn(inn: string): CompanyRow | undefined {
+    const r = db.prepare("SELECT * FROM companies WHERE inn = ?").get(inn) as Row | undefined;
     return r && toCompany(r);
   },
   byInvite(invite: string): CompanyRow | undefined {
@@ -230,19 +250,82 @@ export const bids = {
     const id = randomUUID();
     const at = Date.now();
     db.prepare(
-      "INSERT INTO bids (id, crop, price, volume, regions, buyer, name, contact, ip, at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')"
+      "INSERT INTO bids (id, crop, price, volume, regions, buyer, name, contact, ip, at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')"
     ).run(id, b.crop, b.price, b.volume, JSON.stringify(b.regions), b.buyer, b.name, b.contact, b.ip, at);
-    return { id, price: b.price, volume: b.volume, regions: b.regions, buyer: b.buyer, at, status: "active" };
+    return { id, price: b.price, volume: b.volume, regions: b.regions, buyer: b.buyer, at, status: "pending" };
   },
   /** Активные заявки за последние 14 дней */
   active(crop = "flax"): Bid[] {
     const from = Date.now() - 14 * 86_400_000;
     return (db.prepare("SELECT * FROM bids WHERE crop = ? AND status = 'active' AND at >= ? ORDER BY price DESC").all(crop, from) as Row[]).map(toBid);
   },
+  /** Модератор проверил заявку — показываем в стакане */
+  approve(id: string): Bid | undefined {
+    db.prepare("UPDATE bids SET status = 'active' WHERE id = ? AND status = 'pending'").run(id);
+    const r = db.prepare("SELECT * FROM bids WHERE id = ?").get(id) as Row | undefined;
+    return r && toBid(r);
+  },
   remove(id: string): Bid | undefined {
     db.prepare("UPDATE bids SET status = 'removed' WHERE id = ?").run(id);
     const r = db.prepare("SELECT * FROM bids WHERE id = ?").get(id) as Row | undefined;
     return r && toBid(r);
+  },
+};
+
+export interface Application {
+  id: string;
+  channel: Channel;
+  userId: string;
+  userName: string | null;
+  userHandle: string | null;
+  companyName: string;
+  inn: string;
+  regionId: RegionId;
+  person: string;
+  phone: string;
+  status: "pending" | "approved" | "rejected";
+  companyId: string | null;
+  createdAt: number;
+}
+
+const toApp = (r: Row): Application => ({
+  id: String(r.id),
+  channel: String(r.channel) as Channel,
+  userId: String(r.user_id),
+  userName: r.user_name === null ? null : String(r.user_name),
+  userHandle: r.user_handle === null ? null : String(r.user_handle),
+  companyName: String(r.company_name),
+  inn: String(r.inn),
+  regionId: String(r.region_id) as RegionId,
+  person: String(r.person),
+  phone: String(r.phone),
+  status: String(r.status) as Application["status"],
+  companyId: r.company_id === null ? null : String(r.company_id),
+  createdAt: Number(r.created_at),
+});
+
+/** Анкеты предприятий на подключение к боту: до подтверждения цены не принимаются */
+export const applications = {
+  insert(a: Omit<Application, "id" | "status" | "companyId" | "createdAt">): Application {
+    const id = randomUUID();
+    db.prepare(
+      "INSERT INTO applications (id, channel, user_id, user_name, user_handle, company_name, inn, region_id, person, phone, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)"
+    ).run(id, a.channel, a.userId, a.userName, a.userHandle, a.companyName, a.inn, a.regionId, a.person, a.phone, Date.now());
+    return this.get(id)!;
+  },
+  get(id: string): Application | undefined {
+    const r = db.prepare("SELECT * FROM applications WHERE id = ?").get(id) as Row | undefined;
+    return r && toApp(r);
+  },
+  pendingFor(channel: Channel, userId: string): Application | undefined {
+    const r = db.prepare("SELECT * FROM applications WHERE channel = ? AND user_id = ? AND status = 'pending'").get(channel, userId) as Row | undefined;
+    return r && toApp(r);
+  },
+  pending(): Application[] {
+    return (db.prepare("SELECT * FROM applications WHERE status = 'pending' ORDER BY created_at").all() as Row[]).map(toApp);
+  },
+  decide(id: string, status: "approved" | "rejected", companyId?: string) {
+    db.prepare("UPDATE applications SET status = ?, company_id = ?, decided_at = ? WHERE id = ?").run(status, companyId ?? null, Date.now(), id);
   },
 };
 

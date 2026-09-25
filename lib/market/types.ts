@@ -55,7 +55,8 @@ export interface Bid {
   /** Кто покупает */
   buyer?: BuyerType;
   at: number;
-  status: "active" | "removed";
+  /** pending — ждёт проверки модератором и в стакане не показывается */
+  status: "pending" | "active" | "removed";
   /** Заявка, оставленная в этом браузере */
   own?: boolean;
 }

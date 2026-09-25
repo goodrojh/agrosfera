@@ -3,7 +3,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { config, mskDay } from "./config.ts";
 import { bids, companies, leads, quotes } from "./db.ts";
-import { bus, publishBid } from "./core.ts";
+import { bus } from "./core.ts";
 import { computeIndex, latestAccepted } from "../../lib/market/aggregate.ts";
 import { checkBid } from "../../lib/market/validate.ts";
 import { isRegionId } from "../../lib/market/regions.ts";
@@ -133,9 +133,9 @@ export function startApi() {
         if (err) return json(res, 400, { error: err });
         if (name.length < 2 || contact.length < 5) return json(res, 400, { error: "Укажите имя и телефон / Telegram" });
         const bid = bids.insert({ crop: "flax", price, volume, regions, buyer, name, contact, ip });
-        publishBid(bid);
+        // В стакан попадает только после подтверждения модератором
         notifyBid(bid, `${name} · ${contact}`);
-        return json(res, 200, { ok: true, bid });
+        return json(res, 200, { ok: true, bid, pending: true });
       }
 
       if (req.method === "POST" && url.pathname === "/api/leads") {

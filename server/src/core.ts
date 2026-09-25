@@ -5,6 +5,7 @@ import { mskDay } from "./config.ts";
 import { companies, members, quotes, type Channel } from "./db.ts";
 import { latestAccepted, referenceInfo } from "../../lib/market/aggregate.ts";
 import { GREETING, HELP, replyToButton, replyToText, type ButtonId, type Pending } from "../../lib/market/dialog.ts";
+import { handleGuest } from "./registration.ts";
 import { checkQuote, parseSubmission } from "../../lib/market/validate.ts";
 import { REGION_BY_ID } from "../../lib/market/regions.ts";
 import type { Bid, Company, Quote } from "../../lib/market/types.ts";
@@ -27,16 +28,28 @@ export interface Incoming {
   channel: Channel;
   userId: string;
   userName?: string;
+  /** @username в мессенджере — для модератора */
+  userHandle?: string;
   text?: string;
-  button?: ButtonId;
+  /** Нажатая кнопка: «b:confirm», «reg:start», «reg:region:omsk»… */
+  button?: string;
+  /** Номер из кнопки «Отправить номер» */
+  phone?: string;
   /** Код приглашения из deep link (/start CODE) */
   startPayload?: string;
 }
 
 export interface Outgoing {
   text: string;
-  buttons?: { id: ButtonId; label: string }[];
+  buttons?: { id: string; label: string }[];
+  /** Показать кнопку «Отправить номер телефона» */
+  requestContact?: boolean;
+  /** Убрать клавиатуру с кнопкой номера */
+  removeKeyboard?: boolean;
 }
+
+/** Отправка сообщения пользователю в его мессенджере (подключают telegram.ts и max.ts) */
+export const senders: Partial<Record<Channel, (userId: string, out: Outgoing) => Promise<void>>> = {};
 
 /** Хук уведомления модератора (подключает telegram.ts) */
 export let notifyModeration: (q: Quote, company: string) => void = () => {};
@@ -48,14 +61,14 @@ const sessions = new Map<string, Pending>();
 const rub = (n: number) => Math.round(n).toLocaleString("ru-RU");
 const INVITE_RE = /^[A-Z0-9]{8}$/i;
 
-function linkByInvite(msg: Incoming, code: string): Outgoing | null {
+function linkByInvite(msg: Incoming, code: string): Outgoing[] | null {
   const company = companies.byInvite(code.trim());
   if (!company) return null;
   members.link(msg.channel, msg.userId, company.id, msg.userName);
-  return { text: `Предприятие «${company.name}» (${REGION_BY_ID[company.regionId].name}) подключено.\n\n${GREETING}` };
+  return [{ text: `Предприятие «${company.name}» (${REGION_BY_ID[company.regionId].name}) подключено.\n\n${GREETING}` }];
 }
 
-export function handle(msg: Incoming): Outgoing {
+export function handle(msg: Incoming): Outgoing[] {
   const key = `${msg.channel}:${msg.userId}`;
 
   if (msg.startPayload) {
@@ -69,13 +82,12 @@ export function handle(msg: Incoming): Outgoing {
       const linked = linkByInvite(msg, msg.text);
       if (linked) return linked;
     }
-    return {
-      text: "Этот бот принимает цены от предприятий-участников АгроСферы.\nОтправьте код приглашения из 8 символов или откройте ссылку, которую прислал менеджер.",
-    };
+    // Не подтверждён — только анкета на подключение, цены не принимаем
+    return handleGuest(msg);
   }
 
   const company = companies.get(member.companyId);
-  if (!company || !company.active) return { text: "Предприятие отключено. Свяжитесь с менеджером АгроСферы." };
+  if (!company || !company.active) return [{ text: "Предприятие отключено. Свяжитесь с менеджером АгроСферы." }];
 
   const now = Date.now();
   const today = mskDay(now);
@@ -92,19 +104,22 @@ export function handle(msg: Incoming): Outgoing {
   };
 
   const text = msg.text?.trim() ?? "";
+  // Кнопки анкеты у уже подтверждённого пользователя не нужны
+  if (msg.button && !msg.button.startsWith("b:")) return [{ text: GREETING }];
+  const dialogButton = msg.button ? (msg.button.slice(2) as ButtonId) : undefined;
   if (!msg.button) {
-    if (/^\/?(start|старт)$/i.test(text)) return { text: GREETING };
-    if (/^\/?(help|помощь)$/i.test(text)) return { text: HELP };
+    if (/^\/?(start|старт)$/i.test(text)) return [{ text: GREETING }];
+    if (/^\/?(help|помощь)$/i.test(text)) return [{ text: HELP }];
     if (/^\/?(status|статус)$/i.test(text)) {
-      return {
+      return [{
         text: mine
           ? `Ваша цена сегодня: ${rub(mine.price)} ₽/т · ${rub(mine.volume)} т (обновлено ${new Date(mine.at).toLocaleTimeString("ru-RU", { timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit" })}).`
           : "Сегодня вы ещё не присылали цену.",
-      };
+      }];
     }
   }
 
-  const reply = msg.button ? replyToButton(msg.button, sessions.get(key), ctx) : replyToText(text, ctx);
+  const reply = dialogButton ? replyToButton(dialogButton, sessions.get(key), ctx) : replyToText(text, ctx);
 
   if (reply.pending) sessions.set(key, reply.pending);
   else sessions.delete(key);
@@ -151,7 +166,7 @@ export function handle(msg: Incoming): Outgoing {
     if (reply.accept.moderation) notifyModeration(q, `${company.name} (${company.code})`);
   }
 
-  return { text: reply.text, buttons: reply.buttons };
+  return [{ text: reply.text, buttons: reply.buttons?.map((b) => ({ id: `b:${b.id}`, label: b.label })) }];
 }
 
 /** Решение модератора по цене */
