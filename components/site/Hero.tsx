@@ -49,7 +49,7 @@ export default function Hero({ className }: { className?: string }) {
               <span className="text-white font-semibold tracking-[0.14em] text-[13px] md:text-[15px]">АГРОСФЕРА</span>
             </a>
 
-            <div className="hidden md:flex items-center gap-8 absolute left-1/2 -translate-x-1/2 whitespace-nowrap">
+            <div className="hidden lg:flex items-center gap-8 absolute left-1/2 -translate-x-1/2 whitespace-nowrap">
               {NAV.map((item) => (
                 <a key={item.href} href={item.href} className="text-[15px] font-medium text-white/70 hover:text-white transition-colors relative group">
                   {item.label}
@@ -59,7 +59,7 @@ export default function Hero({ className }: { className?: string }) {
             </div>
 
             <div className="flex items-center gap-2 md:gap-3">
-              <a href={botHref} className="hidden sm:block text-[15px] font-medium text-white/70 hover:text-white transition-colors px-3 py-2">
+              <a href={botHref} className="hidden lg:block text-[15px] font-medium text-white/70 hover:text-white transition-colors px-3 py-2">
                 Подать цену
               </a>
               <a
