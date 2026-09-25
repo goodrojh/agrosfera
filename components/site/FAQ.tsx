@@ -1,116 +1,66 @@
 "use client";
 
 import React, { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { asset } from "@/lib/config";
+import { ChevronDown } from "lucide-react";
 import { LIMITS } from "@/lib/market/validate";
 
-const faqs = [
+const GROUPS: { title: string; items: [string, string][] }[] = [
   {
-    question: "Откуда берутся цены?",
-    answer:
-      "Их присылают сами производители. Каждое утро сотрудник предприятия отправляет в наш бот (Telegram или MAX) цену за тонну и свободный объём. Предприятие попадает в систему только по нашему приглашению — случайные люди цены не подают.",
+    title: "Котировки",
+    items: [
+      ["Откуда берутся цены?", "Их публикуют сами предприятия-производители — в личном кабинете или через Telegram-бот. Подавать цены могут только компании, которые прошли проверку."],
+      ["Какая цена указана?", "Рубли за тонну с НДС, самовывоз со склада предприятия (EXW). Доставку считаем отдельно под конкретную сделку."],
+      ["Что такое средняя цена?", "Медиана цен предприятий за сегодня. Учитывается только последняя цена каждого предприятия, поэтому одиночная ошибка или выброс её не сдвигает."],
+      ["Видно ли, какое предприятие дало цену?", "Нет. В стакане видны только регион, цена и объём. Названия и контакты сторон знает только АгроСфера."],
+      [
+        "Что если предприятие ошибётся в цифре?",
+        `Сайт и бот проверяют каждую цену. «30» вместо «30 000» или лишний ноль — переспросят. Отклонение от рынка больше ${Math.round(LIMITS.soft * 100)}% нужно подтвердить, больше ${Math.round(LIMITS.hard * 100)}% — цена уходит на проверку менеджеру.`,
+      ],
+    ],
   },
   {
-    question: "Что если предприятие ошибётся в цифре?",
-    answer: `Бот повторяет, что понял, и переспрашивает. «30» вместо «30 000» — предложит исправить одной кнопкой. Лишний ноль — тоже. Цена, которая отличается от медианы региона больше чем на ${Math.round(LIMITS.soft * 100)}%, требует подтверждения, больше чем на ${Math.round(LIMITS.hard * 100)}% — уходит модератору и не участвует в индексе до проверки. А сам индекс — медиана, поэтому одиночный выброс его не сдвигает.`,
+    title: "Участие",
+    items: [
+      ["Как стать участником?", "Зарегистрируйтесь в личном кабинете как предприятие, экспортёр или агент. Менеджер позвонит, проверит компанию и откроет доступ — обычно в течение рабочего дня."],
+      ["Нужен ли ИНН?", "Желательно, но не обязательно — менеджер уточнит данные компании при звонке."],
+      ["Сколько это стоит?", "Для предприятий — бесплатно. С экспортёрами работаем по договору: условия выкупа и отгрузки — в коммерческом предложении. С агентами — договор, наше вознаграждение — процент от сделки."],
+    ],
   },
   {
-    question: "Как обновить цену в течение дня?",
-    answer:
-      "Просто отправить боту новое сообщение. Новая цена сразу заменит прежнюю в расчёте, график обновится в реальном времени. Прежние значения сохраняются в истории.",
-  },
-  {
-    question: "Видно ли, какое предприятие дало цену?",
-    answer:
-      "Нет. Наружу показываем регион, цену и объём под кодом вида «П-0412». Контакты производителя передаются только в рамках сделки через нас.",
-  },
-  {
-    question: "Какая цена указана в котировке?",
-    answer:
-      "Рубли за тонну масличного льна с НДС на условиях EXW — со склада предприятия. Доставку до порта или погранперехода считаем отдельно под конкретную заявку.",
-  },
-  {
-    question: "Зачем разбивка по направлениям?",
-    answer:
-      "Логистика часто важнее разницы в цене. Для Китая выгоднее брать Сибирь и Дальний Восток — плечо до Забайкальска и Благовещенска короче. Для Чёрного моря — Юг и Нижнее Поволжье. Фильтр направления показывает только подходящие регионы.",
-  },
-  {
-    question: "Сколько это стоит?",
-    answer:
-      "Смотреть котировки и подавать цены — бесплатно. С экспортёром работаем как агент: выкупаем и доставляем партию, цена — в коммерческом предложении. С агентами заключаем договор и получаем процент от сделки.",
+    title: "Сделки",
+    items: [
+      ["Как купить или продать по цене из стакана?", "В личном кабинете нажмите на цену: экспортёр и агент — на цену предприятия, предприятие — на заявку покупателя. Запрос придёт менеджеру, он проведёт сделку."],
+      ["Можно ли продать часть заявки покупателя?", "Нет. Предприятие закрывает заявку целиком, поэтому его свободный объём должен быть не меньше объёма заявки. Покупатель может взять у предприятия как весь объём, так и часть."],
+      ["Что происходит, когда цены сошлись?", "Если заявка покупателя не ниже цены предприятия, система сразу сообщает менеджеру. Он проверяет стороны, связывается с ними, и сделка появляется в личном кабинете в разделе «Совпадения»."],
+      ["Как обновить цену в течение дня?", "Подайте новую цену в кабинете или отправьте боту новое сообщение — стакан обновится сразу."],
+    ],
   },
 ];
 
-export default function FAQ({ className }: { className?: string }) {
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
-
+export default function FAQ() {
+  const [open, setOpen] = useState<string | null>(null);
   return (
-    <section id="faq" className={"w-full bg-white py-20 px-4 md:px-6 font-sans scroll-mt-10 " + (className || "")}>
-      <div className="max-w-[640px] mx-auto">
-        <div className="text-center mb-12">
-          <h2 className="text-[#111010] font-sans text-[34px] md:text-[48px] font-semibold leading-[1.1] tracking-tight mb-5 text-center">
-            Частые <br /> вопросы
-          </h2>
-          <p className="text-[#7d8778] text-[16px] leading-[1.6] text-center max-w-[450px] mx-auto">
-            Коротко о том, откуда цифры и как с ними работать.
-          </p>
-        </div>
-
-        <div className="relative max-w-[600px] mx-auto group">
-          <div className="absolute -inset-3 md:-inset-8 bg-gray-100 rounded-[32px] md:rounded-[40px] overflow-hidden z-0 shadow-inner">
-            <img
-              src={asset("/media/macro.jpg")}
-              alt=""
-              loading="lazy"
-              className="w-full h-full object-cover opacity-90"
-            />
+    <section className="bg-white px-4 md:px-8 py-14 md:py-20">
+      <div className="max-w-3xl mx-auto space-y-12">
+        {GROUPS.map((g) => (
+          <div key={g.title}>
+            <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-[#1F5A25]">{g.title}</h2>
+            <div className="mt-4 border-t border-gray-200">
+              {g.items.map(([q, a]) => {
+                const isOpen = open === q;
+                return (
+                  <div key={q} className="border-b border-gray-200">
+                    <button onClick={() => setOpen(isOpen ? null : q)} aria-expanded={isOpen} className="w-full flex items-center justify-between gap-4 py-5 text-left">
+                      <span className="text-[17px] font-medium text-gray-900">{q}</span>
+                      <ChevronDown size={18} className={"shrink-0 text-gray-400 transition-transform " + (isOpen ? "rotate-180" : "")} />
+                    </button>
+                    {isOpen && <p className="pb-5 -mt-1 text-[15px] text-gray-600 leading-relaxed max-w-2xl">{a}</p>}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-
-          <div className="relative z-10 bg-white/85 rounded-[24px] md:rounded-[32px] border border-white/50 overflow-hidden shadow-[0_24px_80px_rgba(0,0,0,0.08)]">
-            {faqs.map((faq, index) => {
-              const isOpen = openIndex === index;
-              return (
-                <div
-                  key={index}
-                  className={"relative bg-transparent transition-colors duration-150 border-b border-white/40 last:border-b-0 " + (!isOpen ? "hover:bg-white/25" : "")}
-                >
-                  <button
-                    onClick={() => setOpenIndex(isOpen ? null : index)}
-                    className="w-full text-left px-5 py-5 md:px-7 md:py-6 flex items-center justify-between gap-4 cursor-pointer focus:outline-none"
-                  >
-                    <span className="text-[#111010] text-[16px] font-semibold tracking-tight">{faq.question}</span>
-                    <motion.span
-                      animate={{ rotate: isOpen ? 180 : 0 }}
-                      transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] as const }}
-                      className="text-[#111010]/60 flex items-center justify-center shrink-0"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M6 9l6 6 6-6" />
-                      </svg>
-                    </motion.span>
-                  </button>
-                  <AnimatePresence initial={false}>
-                    {isOpen && (
-                      <motion.div
-                        key={"faq-answer-" + index}
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] as const }}
-                        className="overflow-hidden"
-                      >
-                        <div className="px-5 md:px-7 pb-6 md:pb-7 pt-0">
-                          <p className="text-[#333833] text-[15px] leading-[1.7] font-medium">{faq.answer}</p>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        ))}
       </div>
     </section>
   );

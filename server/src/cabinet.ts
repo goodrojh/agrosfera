@@ -232,6 +232,12 @@ export async function handleCabinet(req: IncomingMessage, res: ServerResponse, p
     const price = Math.round(Number(b.price));
     const volume = Math.round(Number(b.volume));
     if (!price || !volume) return json(res, 400, { error: "Укажите цену и объём" }), true;
+    // Предприятие закрывает заявку покупателя целиком — сегодня должно быть заявлено не меньше
+    if (side === "sell") {
+      const own = latestAccepted(quotes.ofDay(mskDay(Date.now()), crop)).get(me.id);
+      if (!own) return json(res, 400, { error: "Сначала подайте цену и объём на сегодня в разделе «Мои цены»" }), true;
+      if (own.volume < volume) return json(res, 400, { error: `Сегодня вы заявили ${rub(own.volume)} т — меньше объёма заявки (${rub(volume)} т). Обновите объём в «Мои цены»` }), true;
+    }
     const what = side === "buy" ? "Хочет купить по цене предприятия" : "Хочет продать по цене покупателя";
     leads.insert({
       role: me.role,

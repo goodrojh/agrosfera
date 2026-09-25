@@ -1,165 +1,117 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef } from "react";
-import { motion } from "framer-motion";
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import React, { useMemo } from "react";
+import { ArrowDownRight, ArrowRight, ArrowUpRight } from "lucide-react";
 import { useMarket } from "@/components/market/MarketProvider";
 import { computeIndex, lastHistoryDay } from "@/lib/market/aggregate";
-import { CROP_BY_ID } from "@/lib/market/crops";
+import { CROPS, CROP_BY_ID } from "@/lib/market/crops";
 import { pct, rub, tons } from "@/lib/market/format";
-import { asset, TELEGRAM_BOT_URL } from "@/lib/config";
+import { asset } from "@/lib/config";
+import SiteHeader from "./SiteHeader";
 
-const NAV = [
-  { label: "Котировки", href: "#terminal" },
-  { label: "Сотрудничество", href: asset("/sotrudnichestvo/") },
-  { label: "Инструкция", href: asset("/sotrudnichestvo/#instrukciya") },
-];
+/** Первый экран: что это за инструмент и живая сводка по рынку */
+export default function Hero() {
+  const { ready, latest, history, bids, crop } = useMarket();
 
-export default function Hero({ className }: { className?: string }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  // Видео играет только когда его видно: при прокрутке вниз не тратит ресурсы
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.playbackRate = 0.7;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      v.pause();
-      return;
-    }
-    const io = new IntersectionObserver(([e]) => (e.isIntersecting ? v.play().catch(() => {}) : v.pause()), { threshold: 0.05 });
-    io.observe(v);
-    return () => io.disconnect();
-  }, []);
-
-  const botHref = TELEGRAM_BOT_URL || asset("/sotrudnichestvo/#bot");
-
-  // Живая цена прямо на первом экране
-  const { ready, latest, history, crop } = useMarket();
-  const now = useMemo(() => (ready ? computeIndex([...latest.values()]) : null), [ready, latest]);
-  const prev = useMemo(() => {
+  const board = useMemo(() => {
+    if (!ready) return null;
+    const asks = [...latest.values()];
+    const now = computeIndex(asks);
     const d = lastHistoryDay(history);
-    return computeIndex(history.filter((h) => h.day === d));
-  }, [history]);
-  const change = now && prev ? now.index / prev.index - 1 : null;
+    const prev = computeIndex(history.filter((h) => h.day === d));
+    return {
+      index: now?.index ?? null,
+      change: now && prev ? now.index / prev.index - 1 : null,
+      bestAsk: asks.length ? Math.min(...asks.map((q) => q.price)) : null,
+      bestBid: bids.length ? Math.max(...bids.map((b) => b.price)) : null,
+      volume: now?.volume ?? 0,
+      sellers: asks.length,
+    };
+  }, [ready, latest, history, bids]);
+
+  const rows: [string, string][] = board
+    ? [
+        ["Лучшая цена продавца", board.bestAsk ? `${rub(board.bestAsk)} ₽/т` : "—"],
+        ["Лучшая заявка покупателя", board.bestBid ? `${rub(board.bestBid)} ₽/т` : "—"],
+        ["Свободный объём", board.volume ? tons(board.volume) : "—"],
+        ["Предприятий с ценой сегодня", String(board.sellers)],
+      ]
+    : [];
 
   return (
-    <section className={"min-h-[88vh] md:min-h-[92vh] flex flex-col bg-[#07160a] relative overflow-hidden " + (className || "")}>
-      {/* Video Background */}
-      <div className="absolute inset-0 z-0 overflow-hidden">
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="metadata"
-          poster={asset("/media/hero.jpg")}
-          className="absolute inset-0 w-full h-full object-cover"
-        >
-          <source src={asset("/media/hero.mp4")} type="video/mp4" />
-        </video>
-        {/* Overlay для читаемости текста */}
-        <div className="absolute inset-0 bg-gradient-to-b from-[#07160a]/55 via-[#07160a]/35 to-[#07160a]/70" />
-      </div>
+    <section className="relative bg-[#07160a] text-white overflow-hidden">
+      {/* Тонкая сетка — строгий «терминальный» фон */}
+      <div
+        aria-hidden
+        className="absolute inset-0 opacity-[0.07]"
+        style={{
+          backgroundImage: "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)",
+          backgroundSize: "56px 56px",
+          maskImage: "linear-gradient(to bottom, black, transparent 90%)",
+        }}
+      />
+      <SiteHeader active="quotes" />
 
-      {/* Navigation Bar */}
-      <div className="absolute top-4 md:top-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-32px)] md:w-[90%] max-w-5xl">
-        <motion.nav initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.8, ease: "easeOut" as const }}>
-          <div className="relative flex items-center justify-between p-[8px] md:p-[10px] rounded-full bg-[#07160a]/45 border border-white/10">
-            <a href="#" className="flex items-center gap-2.5 pl-1.5">
-              <img src={asset("/brand/emblem.png")} alt="АгроСфера" className="h-8 w-8 md:h-9 md:w-9 rounded-full ring-1 ring-white/20" />
-              <span className="text-white font-semibold tracking-[0.14em] text-[13px] md:text-[15px]">АГРОСФЕРА</span>
+      <div className="relative max-w-6xl mx-auto px-4 md:px-8 py-14 md:py-24 grid lg:grid-cols-[1.2fr_1fr] gap-12 lg:gap-16 items-center">
+        <div>
+          <p className="text-[13px] uppercase tracking-[0.2em] text-[#8CC152] font-medium">Котировки агрокультур</p>
+          <h1 className="mt-4 text-[38px] sm:text-[48px] md:text-[56px] font-semibold leading-[1.05] tracking-[-0.02em]">Цены напрямую от предприятий</h1>
+          <p className="mt-6 text-[17px] md:text-lg text-white/70 max-w-xl leading-relaxed">
+            Предприятия каждый день публикуют цены и свободные объёмы, экспортёры и агенты — заявки на покупку. Когда цены сходятся, АгроСфера проводит сделку.
+          </p>
+          <div className="mt-8 flex flex-col sm:flex-row gap-3">
+            <a href="#terminal" className="inline-flex items-center justify-center gap-2 rounded-lg bg-white text-[#0b1f0e] px-6 py-3.5 text-[15px] font-semibold hover:bg-white/90 transition-colors">
+              Открыть котировки <ArrowRight size={17} />
             </a>
-
-            <div className="hidden lg:flex items-center gap-8 absolute left-1/2 -translate-x-1/2 whitespace-nowrap">
-              {NAV.map((item) => (
-                <a key={item.href} href={item.href} className="text-[15px] font-medium text-white/70 hover:text-white transition-colors relative group">
-                  {item.label}
-                  <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-white transition-all group-hover:w-full" />
-                </a>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2 md:gap-3">
-              <a href={botHref} className="hidden lg:block text-[15px] font-medium text-white/70 hover:text-white transition-colors px-3 py-2">
-                Подать цену
-              </a>
-              <a
-                href={asset("/kabinet/")}
-                className="rounded-full px-4 md:px-5 py-2 text-sm md:text-[15px] font-semibold bg-white text-[#0d2410] hover:bg-white/90 transition-all hover:scale-105 active:scale-95"
-              >
-                Личный кабинет
-              </a>
-            </div>
+            <a href={asset("/kabinet/")} className="inline-flex items-center justify-center rounded-lg border border-white/25 px-6 py-3.5 text-[15px] font-semibold text-white hover:bg-white/10 transition-colors">
+              Личный кабинет
+            </a>
           </div>
-        </motion.nav>
-      </div>
+          <dl className="mt-12 grid grid-cols-3 gap-6 border-t border-white/10 pt-6 max-w-xl">
+            {[
+              [String(CROPS.length), "культур"],
+              ["₽/т", "с НДС, со склада"],
+              ["100%", "участников проверены"],
+            ].map(([v, l]) => (
+              <div key={l}>
+                <dt className="text-xl md:text-2xl font-semibold tabular-nums">{v}</dt>
+                <dd className="mt-1 text-[13px] text-white/50">{l}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
 
-      {/* Hero Content */}
-      <div className="relative flex-1 flex flex-col items-center text-center px-4 md:px-6 pt-[128px] md:pt-[170px] pb-16 z-10 justify-center">
-        <div className="flex flex-col items-center w-full">
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.1, ease: "easeOut" as const }}
-            className="text-center font-semibold text-[40px] sm:text-5xl md:text-6xl lg:text-[62px] leading-[1.08] tracking-[-0.02em] text-white max-w-4xl mt-0 mb-4"
-          >
-            Агрорынок
-            <br />в <span className="italic text-[#C3E79A]">реальных цифрах</span>
-          </motion.h1>
-
-          <motion.p
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.2, ease: "easeOut" as const }}
-            className="text-center text-base md:text-lg text-white/85 max-w-[560px] leading-relaxed mb-8"
-          >
-            Цены и свободные объёмы производителей — каждое утро, из первых рук. Выберите культуру, направление экспорта и регион.
-          </motion.p>
-
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.3, ease: "easeOut" as const }}
-            className="flex flex-col items-center gap-3"
-          >
-            <div className="flex flex-col sm:flex-row items-center gap-3">
-              <a
-                href="#terminal"
-                className="rounded-full px-8 py-4 text-base font-semibold bg-white/15 border border-white/25 text-white hover:bg-white/20 transition-all shadow-2xl hover:scale-105 active:scale-95"
-                style={{ boxShadow: "0 8px 32px 0 rgba(28, 80, 34, 0.45)" }}
-              >
-                Открыть котировки
-              </a>
-              <a href={botHref} className="rounded-full px-6 py-4 text-base font-medium text-white/80 hover:text-white transition-colors">
-                Я производитель — подать цену →
-              </a>
-            </div>
-          </motion.div>
-
-          {/* Живая цена */}
-          <motion.a
-            href="#terminal"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.45, ease: "easeOut" as const }}
-            className="mt-10 inline-flex flex-col sm:flex-row items-center gap-3 sm:gap-6 rounded-2xl bg-white px-6 py-4 shadow-2xl hover:scale-[1.02] transition-transform"
-          >
-            <span className="flex items-center gap-2 text-sm text-gray-500">
-              <span className="w-2 h-2 rounded-full bg-[#4f9a2a] agr-pulse" />
-              {CROP_BY_ID[crop].name} сегодня
+        {/* Сводка по выбранной культуре */}
+        <a href="#terminal" className="block rounded-2xl border border-white/10 bg-white/[0.04] p-6 md:p-7 hover:border-white/20 transition-colors">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-white/60">{CROP_BY_ID[crop].name} · сегодня</p>
+            <span className="inline-flex items-center gap-2 text-xs text-[#8CC152]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#8CC152] agr-pulse" /> онлайн
             </span>
-            <span className="text-2xl font-bold tabular-nums text-[#111]">{now ? `${rub(now.index)} ₽/т` : "—"}</span>
-            {change !== null && (
-              <span className={"inline-flex items-center gap-0.5 text-sm font-semibold tabular-nums " + (change >= 0 ? "text-[#2f7a1f]" : "text-[#c0492f]")}>
-                {change >= 0 ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />}
-                {pct(change)}
+          </div>
+          <div className="mt-3 flex items-baseline gap-3 flex-wrap">
+            <span className="text-[40px] md:text-[44px] font-semibold tabular-nums leading-none">{board?.index ? rub(board.index) : "—"}</span>
+            <span className="text-white/50">₽/т</span>
+            {board?.change != null && (
+              <span className={"inline-flex items-center text-sm font-semibold tabular-nums " + (board.change >= 0 ? "text-[#8CC152]" : "text-[#f08a73]")}>
+                {board.change >= 0 ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />}
+                {pct(board.change)}
               </span>
             )}
-            <span className="text-sm text-gray-500 tabular-nums">{now ? `свободно ${tons(now.volume)}` : ""}</span>
-          </motion.a>
-        </div>
+          </div>
+          <p className="mt-1 text-xs text-white/40">средняя цена продавцов</p>
+          <dl className="mt-6 divide-y divide-white/10 border-t border-white/10">
+            {rows.map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-4 py-3 text-sm">
+                <dt className="text-white/55">{k}</dt>
+                <dd className="font-medium tabular-nums">{v}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-5 inline-flex items-center gap-1.5 text-sm text-white/70">
+            Смотреть стакан <ArrowRight size={15} />
+          </p>
+        </a>
       </div>
     </section>
   );

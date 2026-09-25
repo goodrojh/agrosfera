@@ -125,7 +125,7 @@ function MapDialog({
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
             <p className="text-lg font-semibold text-gray-900">Выберите регионы</p>
-            <p className="text-sm text-gray-500">Нажимайте на регионы, чтобы отметить несколько. Чем темнее, тем дешевле; серые — нет производителей.</p>
+            <p className="text-sm text-gray-500">Нажимайте на регионы, чтобы отметить несколько. Чем темнее, тем дешевле; серые — нет предприятий.</p>
           </div>
           <button onClick={onClose} aria-label="Закрыть" className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100">
             <X size={18} />
@@ -167,6 +167,9 @@ function MapDialog({
   );
 }
 
+/** Суммарный объём строки стакана по цене */
+const volumeAt = (rows: { price: number; volume: number }[], price: number) => rows.filter((r) => r.price === price).reduce((s, r) => s + r.volume, 0);
+
 /**
  * Окно котировок.
  * На сайте — только просмотр (в демо-режиме кнопки работают для показа).
@@ -179,7 +182,7 @@ export default function Terminal({ inCabinet = false, role = null, onOwnPrice }:
   const [bidDraft, setBidDraft] = useState<{ price?: number; volume?: number } | null>(null);
   const closeMap = useCallback(() => setMapOpen(false), []);
   const closeBid = useCallback(() => setBidDraft(null), []);
-  const [deal, setDeal] = useState<{ side: "buy" | "sell"; price: number; volume?: number } | null>(null);
+  const [deal, setDeal] = useState<{ side: "buy" | "sell"; price: number; volume: number } | null>(null);
   const closeDeal = useCallback(() => setDeal(null), []);
   const [guideOpen, setGuideOpen] = useState(false);
   const closeGuide = useCallback(() => setGuideOpen(false), []);
@@ -189,7 +192,7 @@ export default function Terminal({ inCabinet = false, role = null, onOwnPrice }:
   const showcase = !inCabinet && mode === "demo";
   const canSell = showcase || (inCabinet && role === "producer");
   const canBuy = showcase || (inCabinet && (role === "exporter" || role === "agent"));
-  const openDeal = (side: "buy" | "sell", price: number, volume?: number) => setDeal({ side, price, volume });
+  const openDeal = (side: "buy" | "sell", price: number, volume: number) => setDeal({ side, price, volume });
 
   const scope = useMemo<Scope>(() => ({ direction: "all", region: null, regions }), [regions]);
   const cropInfo = CROP_BY_ID[crop];
@@ -276,7 +279,7 @@ export default function Terminal({ inCabinet = false, role = null, onOwnPrice }:
           <div className="min-w-0">
             {!supported ? (
               <div className="rounded-2xl border border-dashed border-gray-300 p-10 text-center">
-                <p className="text-xl font-semibold text-gray-900">{cropInfo.name}: подключаем производителей</p>
+                <p className="text-xl font-semibold text-gray-900">{cropInfo.name}: подключаем предприятия</p>
                 <p className="text-gray-500 mt-2 max-w-md mx-auto">Котировки появятся, как только предприятия начнут присылать цены в бот.</p>
               </div>
             ) : (
@@ -324,7 +327,7 @@ export default function Terminal({ inCabinet = false, role = null, onOwnPrice }:
                         {canSell && (
                           <button
                             disabled={!bestBid}
-                            onClick={() => bestBid && openDeal("sell", bestBid)}
+                            onClick={() => bestBid && openDeal("sell", bestBid, volumeAt(scopedBids, bestBid))}
                             className="rounded-xl border border-[#2f7a1f]/30 px-4 py-2.5 text-sm font-semibold text-[#2f7a1f] hover:bg-[#f1f7ec] disabled:opacity-40 transition-colors"
                           >
                             {showcase ? "Предприятию: продать покупателю" : bestBid ? `Продать покупателю по ${rub(bestBid)} ₽/т` : "Покупателей пока нет"}
@@ -349,7 +352,7 @@ export default function Terminal({ inCabinet = false, role = null, onOwnPrice }:
                         {canBuy && (
                           <button
                             disabled={!bestAsk}
-                            onClick={() => bestAsk && openDeal("buy", bestAsk)}
+                            onClick={() => bestAsk && live && openDeal("buy", bestAsk, volumeAt(live.inS, bestAsk))}
                             className="rounded-xl border border-[#c0492f]/30 px-4 py-2.5 text-sm font-semibold text-[#c0492f] hover:bg-[#fdf1ee] disabled:opacity-40 transition-colors"
                           >
                             {showcase ? "Экспортёру и агенту: купить у предприятия" : bestAsk ? `Купить у предприятия по ${rub(bestAsk)} ₽/т` : "Предложений пока нет"}
@@ -401,8 +404,6 @@ export default function Terminal({ inCabinet = false, role = null, onOwnPrice }:
           price={deal.price}
           volume={deal.volume}
           cropName={cropInfo.name}
-          available={cropInfo.regions}
-          initialRegion={regions[0]}
           onClose={closeDeal}
         />
       )}

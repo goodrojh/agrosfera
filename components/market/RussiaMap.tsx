@@ -92,7 +92,7 @@ export default function RussiaMap({
       if (s) {
         return `<p class="font-semibold text-[13px]">${title}</p><p class="tabular-nums mt-0.5"><b>${rub(s.index)} ₽/т</b> · ${tons(s.volume)}</p><p class="text-white/60">${s.count} предпр. · нажмите, чтобы отметить</p>`;
       }
-      return `<p class="font-semibold text-[13px]">${title}</p><p class="text-white/60 mt-0.5">${id ? "сегодня цен ещё нет" : "нет производителей этой культуры"}</p>`;
+      return `<p class="font-semibold text-[13px]">${title}</p><p class="text-white/60 mt-0.5">${id ? "сегодня цен ещё нет" : "нет предприятий с этой культурой"}</p>`;
     },
     [stats]
   );

@@ -3,45 +3,41 @@
 import React, { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import { useMarket } from "@/components/market/MarketProvider";
-import { useAccount } from "@/lib/account";
-import { REGION_BY_ID, type RegionId } from "@/lib/market/regions";
+import { CABINET_URL, useAccount } from "@/lib/account";
 import { rub } from "@/lib/market/format";
 
 const field =
   "w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1F5A25]/15 focus:border-[#1F5A25]/40";
 
 /**
- * Сделка по цене из стакана. Запрос приходит нам:
- * buy — экспортёр/агент хочет купить по цене предприятия, sell — предприятие хочет продать по цене покупателя.
+ * Сделка по цене из стакана — запрос менеджеру АгроСферы.
+ * sell — предприятие закрывает заявку покупателя целиком (объём не выбирается);
+ * buy — покупатель берёт объём предприятия целиком или частично.
  */
 export default function DealDialog({
   side,
   price,
-  volume: initialVolume,
+  volume: levelVolume,
   cropName,
-  available,
-  initialRegion,
   onClose,
 }: {
   side: "buy" | "sell";
   price: number;
-  volume?: number;
+  /** Объём строки стакана: заявка покупателя (sell) или свободный объём предприятия (buy) */
+  volume: number;
   cropName: string;
-  available: RegionId[];
-  initialRegion?: RegionId;
   onClose: () => void;
 }) {
-  const { submitDeal, mode } = useMarket();
+  const { submitDeal, mode, crop } = useMarket();
   const { account } = useAccount();
-  const live = mode === "live";
-  const [role, setRole] = useState<"exporter" | "agent">("exporter");
-  const [region, setRegion] = useState<RegionId>(initialRegion ?? available[0]);
-  const [volume, setVolume] = useState(initialVolume ? String(initialVolume) : "");
-  const [name, setName] = useState("");
-  const [contact, setContact] = useState("");
+  const [volume, setVolume] = useState(String(levelVolume));
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<"form" | "sending" | "done">("form");
   const buy = side === "buy";
+
+  // Предприятию хватает объёма, только если сегодня заявлено не меньше, чем в заявке покупателя
+  const own = account?.quotesToday.find((q) => q.crop === crop);
+  const shortage = !buy && mode === "live" && (!own?.volume || own.volume < levelVolume);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -56,16 +52,10 @@ export default function DealDialog({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const v = buy ? Number(volume) : levelVolume;
+    if (buy && (!v || v > levelVolume)) return setError(`Укажите объём до ${rub(levelVolume)} т — столько свободно у предприятия.`);
     setState("sending");
-    const err = await submitDeal({
-      side,
-      price,
-      volume: Number(volume),
-      role: live && account ? account.role : buy ? role : "producer",
-      region: buy ? undefined : region,
-      name,
-      contact,
-    });
+    const err = await submitDeal({ side, price, volume: v, role: account?.role ?? (buy ? "exporter" : "producer"), name: "", contact: "" });
     if (err) {
       setError(err);
       setState("form");
@@ -77,17 +67,15 @@ export default function DealDialog({
   const accent = buy ? "bg-[#c0492f] hover:bg-[#a83e27]" : "bg-[#2f7a1f] hover:bg-[#276719]";
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40" onClick={onClose} role="dialog" aria-modal="true" aria-label={buy ? "Купить по цене предприятия" : "Продать по цене покупателя"}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40" onClick={onClose} role="dialog" aria-modal="true" aria-label={buy ? "Купить у предприятия" : "Продать покупателю"}>
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         {state === "done" ? (
           <div className="py-6 text-center">
             <div className="w-12 h-12 rounded-full bg-[#1F5A25] text-white flex items-center justify-center mx-auto">
               <Check size={24} />
             </div>
-            <p className="mt-4 text-lg font-semibold text-gray-900">Запрос принят</p>
-            <p className="mt-1 text-sm text-gray-500">
-              {buy ? "Проверим предприятие и партию" : "Проверим покупателя"} и свяжемся с вами, чтобы провести сделку через АгроСферу.
-            </p>
+            <p className="mt-4 text-lg font-semibold text-gray-900">Запрос отправлен</p>
+            <p className="mt-1 text-sm text-gray-500">Менеджер АгроСферы свяжется с вами и проведёт сделку.</p>
             {mode === "demo" && <p className="mt-3 text-xs text-gray-400">Демо-режим: запрос никуда не отправлен.</p>}
             <button onClick={onClose} className="mt-6 rounded-xl border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
               Закрыть
@@ -96,10 +84,7 @@ export default function DealDialog({
         ) : (
           <form onSubmit={submit}>
             <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm text-gray-500">{buy ? "Экспортёру или агенту" : "Предприятию"}</p>
-                <p className="text-lg font-semibold text-gray-900">{buy ? "Купить по цене предприятия" : "Продать по цене покупателя"}</p>
-              </div>
+              <p className="text-lg font-semibold text-gray-900">{buy ? "Купить у предприятия" : "Продать покупателю"}</p>
               <button type="button" onClick={onClose} aria-label="Закрыть" className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100">
                 <X size={18} />
               </button>
@@ -110,63 +95,42 @@ export default function DealDialog({
               <p className={"text-2xl font-bold tabular-nums " + (buy ? "text-[#c0492f]" : "text-[#2f7a1f]")}>{rub(price)} ₽/т</p>
             </div>
 
-            {live ? (
-              account && <p className="mt-4 text-sm text-gray-600">От компании: <b className="text-gray-900">{account.name}</b></p>
-            ) : buy ? (
-              <div className="mt-4 flex bg-gray-100 p-1 rounded-xl" role="group" aria-label="Кто вы">
-                {(["exporter", "agent"] as const).map((r) => (
-                  <button
-                    type="button"
-                    key={r}
-                    onClick={() => setRole(r)}
-                    className={
-                      "flex-1 py-2 text-sm rounded-lg transition-colors " +
-                      (role === r ? "bg-white text-gray-900 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-800")
-                    }
-                  >
-                    {r === "exporter" ? "Я экспортёр" : "Я агент"}
-                  </button>
-                ))}
-              </div>
-            ) : (
+            {buy ? (
               <label className="mt-4 block text-sm text-gray-600">
-                Где предприятие
-                <select value={region} onChange={(e) => setRegion(e.target.value as RegionId)} className={field + " mt-1"}>
-                  {available.map((id) => (
-                    <option key={id} value={id}>
-                      {REGION_BY_ID[id].name}
-                    </option>
-                  ))}
-                </select>
+                Объём, т <span className="text-gray-400">— свободно {rub(levelVolume)} т</span>
+                <input
+                  value={volume}
+                  onChange={(e) => setVolume(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  inputMode="numeric"
+                  className={field + " mt-1 tabular-nums"}
+                  autoFocus
+                />
               </label>
+            ) : (
+              <div className="mt-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Объём заявки</span>
+                  <span className="font-semibold text-gray-900 tabular-nums">{rub(levelVolume)} т</span>
+                </div>
+                <p className="mt-1 text-xs text-gray-400">Заявка покупателя закрывается целиком.</p>
+                {shortage && (
+                  <p className="mt-3 rounded-lg bg-[#fff8e6] px-3 py-2 text-[13px] text-gray-700">
+                    {own?.volume ? `Сегодня вы заявили ${rub(own.volume)} т — меньше объёма заявки.` : "Сегодня вы ещё не подали цену и объём по этой культуре."}{" "}
+                    <a href={`${CABINET_URL}#prices`} className="font-medium text-[#1F5A25] underline underline-offset-2">
+                      Обновить объём
+                    </a>
+                  </p>
+                )}
+              </div>
             )}
 
-            <label className="mt-3 block text-sm text-gray-600">
-              {buy ? "Сколько нужно, т" : "Сколько готовы продать, т"}
-              <input
-                value={volume}
-                onChange={(e) => setVolume(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                inputMode="numeric"
-                placeholder="500"
-                className={field + " mt-1 tabular-nums"}
-              />
-            </label>
-
-            {!live && (
-            <div className="grid grid-cols-2 gap-3 mt-3">
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder={buy ? "Имя или компания" : "Название предприятия"} className={field} />
-              <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Телефон или @telegram" className={field} />
-            </div>
-            )}
-
+            {account && <p className="mt-3 text-xs text-gray-500">От компании: {account.name}</p>}
             {error && <p className="mt-3 text-sm text-[#c0492f]">{error}</p>}
 
-            <button type="submit" disabled={state === "sending"} className={"mt-5 w-full rounded-xl text-white py-3 font-semibold disabled:opacity-60 transition-colors " + accent}>
-              {state === "sending" ? "Отправляем…" : buy ? "Хочу купить по этой цене" : "Хочу продать по этой цене"}
+            <button type="submit" disabled={state === "sending" || shortage} className={"mt-5 w-full rounded-xl text-white py-3 font-semibold disabled:opacity-50 transition-colors " + accent}>
+              {state === "sending" ? "Отправляем…" : buy ? "Купить по этой цене" : `Продать ${rub(levelVolume)} т`}
             </button>
-            <p className="mt-3 text-xs text-gray-400 text-center">
-              Запрос придёт менеджеру АгроСферы. Мы {buy ? "проверим предприятие и партию" : "проверим покупателя"}, сведём стороны и проведём сделку через себя.
-            </p>
+            <p className="mt-3 text-xs text-gray-400 text-center">Запрос придёт менеджеру: он проверит стороны и проведёт сделку через АгроСферу.</p>
           </form>
         )}
       </div>

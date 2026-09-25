@@ -4,7 +4,7 @@
 // Нужен Microsoft Edge или Chrome (путь можно задать в BROWSER).
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -112,4 +112,6 @@ await shot("8-bot", { area: `document.querySelector('#bot .flex.flex-col.min-h-\
 
 ws.close();
 spawnSync("taskkill", ["/PID", String(proc.pid), "/T", "/F"]);
+await sleep(500);
+rmSync(profile, { recursive: true, force: true });
 console.log("готово");

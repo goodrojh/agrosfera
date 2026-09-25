@@ -5,9 +5,9 @@ import { asset, CONTACT_EMAIL, MAX_BOT_URL, TELEGRAM_BOT_URL } from "@/lib/confi
 import { CABINET_URL } from "@/lib/account";
 
 const JOIN = [
-  { role: "producer", title: "Предприятию", text: "Подавайте цены на сайте или в боте и продавайте покупателям из стакана." },
-  { role: "exporter", title: "Экспортёру", text: "Ставьте заявки на покупку и покупайте по ценам предприятий — с выкупом и доставкой через нас." },
-  { role: "agent", title: "Агенту", text: "Покупайте под своих заказчиков по договору с АгроСферой и получайте процент со сделки." },
+  { role: "producer", title: "Предприятию", text: "Публикуйте цены и продавайте покупателям из стакана." },
+  { role: "exporter", title: "Экспортёру", text: "Покупайте напрямую у предприятий по всей России." },
+  { role: "agent", title: "Агенту", text: "Закрывайте заказы своих покупателей по договору с АгроСферой." },
 ];
 
 /** Подвал. withForm — блок регистрации (на странице «Сотрудничество»); на главной только ссылки */
@@ -17,10 +17,10 @@ export default function Footer({ className, withForm = true }: { className?: str
   const maxHref = MAX_BOT_URL || coop("#bot");
 
   const columns = [
-    { title: "Инструмент", links: [["Котировки", asset("/#terminal")], ["Попробовать бота", coop("#bot")]] },
-    { title: "Сотрудничество", links: [["Производителям", coop("#partneram")], ["Экспортёрам", coop("#partneram")], ["Агентам", coop("#partneram")], ["Инструкция", coop("#instrukciya")]] },
+    { title: "Инструмент", links: [["Котировки", asset("/#terminal")], ["Личный кабинет", CABINET_URL]] },
+    { title: "Сотрудничество", links: [["Предприятиям", coop("#roli")], ["Экспортёрам", coop("#roli")], ["Агентам", coop("#roli")], ["Личный кабинет", coop("#kabinet")]] },
+    { title: "Компания", links: [["О нас", asset("/o-nas/")], ["Вопросы и ответы", asset("/faq/")], ...(CONTACT_EMAIL ? [[CONTACT_EMAIL, `mailto:${CONTACT_EMAIL}`]] : [])] },
     { title: "Бот", links: [["Telegram", botHref], ["MAX", maxHref]] },
-    { title: "Контакты", links: [...(CONTACT_EMAIL ? [[CONTACT_EMAIL, `mailto:${CONTACT_EMAIL}`]] : []), ["Личный кабинет", CABINET_URL], ["Вопросы и ответы", coop("#faq")]] },
   ];
 
   return (
@@ -33,7 +33,7 @@ export default function Footer({ className, withForm = true }: { className?: str
               <div>
                 <h2 className="text-white font-bold text-[28px] md:text-[34px] leading-[1.2] mb-3">Начать работу</h2>
                 <p className="text-[#9aab98] text-[15px] leading-relaxed max-w-[520px]">
-                  Зарегистрируйтесь в личном кабинете — менеджер позвонит, проверит компанию и откроет доступ к инструменту.
+                  Регистрация — пара минут. Менеджер проверит компанию и откроет доступ к инструменту.
                 </p>
               </div>
               <a href={CABINET_URL} className="text-[#C3E79A] text-sm hover:text-white transition-colors whitespace-nowrap">

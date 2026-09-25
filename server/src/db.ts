@@ -242,8 +242,10 @@ export const companies = {
     return this.list().find((c) => c.role === "producer" && c.phone && phoneKey(c.phone) === key);
   },
   create(input: NewCompany): CompanyRow {
+    // Код по роли: П — предприятие, Э — экспортёр, А — агент
+    const prefix = input.role === "exporter" ? "Э" : input.role === "agent" ? "А" : "П";
     let code = "";
-    do code = `П-${String(randomInt(100, 10000)).padStart(4, "0")}`;
+    do code = `${prefix}-${String(randomInt(100, 10000)).padStart(4, "0")}`;
     while (this.byCode(code));
     const invite = randomBytes(6).toString("base64url").replace(/[-_]/g, "X").slice(0, 8).toUpperCase();
     const id = randomUUID();

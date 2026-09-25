@@ -280,7 +280,6 @@ export default function MarketProvider({ children }: { children: React.ReactNode
     async (input: DealInput): Promise<string | null> => {
       if (!input.volume || input.volume < 1) return "Укажите объём.";
       if (mode === "demo") {
-        if (input.name.trim().length < 2 || input.contact.trim().length < 5) return "Укажите имя или компанию и телефон / Telegram.";
         await new Promise((r) => setTimeout(r, 400));
         return null;
       }
