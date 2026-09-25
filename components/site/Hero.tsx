@@ -1,0 +1,136 @@
+"use client";
+
+import React, { useEffect, useRef } from "react";
+import { motion } from "framer-motion";
+import Terminal from "@/components/site/Terminal";
+import { asset, TELEGRAM_BOT_URL } from "@/lib/config";
+
+const NAV = [
+  { label: "Котировки", href: "#terminal" },
+  { label: "Инструкция", href: "#instrukciya" },
+  { label: "Партнёрам", href: "#partneram" },
+  { label: "FAQ", href: "#faq" },
+];
+
+export default function Hero({ className }: { className?: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.playbackRate = 0.7;
+  }, []);
+
+  const botHref = TELEGRAM_BOT_URL || "#bot";
+
+  return (
+    <section className={"min-h-[110vh] flex flex-col bg-[#07160a] relative " + (className || "")}>
+      {/* Video Background */}
+      <div className="absolute inset-x-0 top-0 h-[120vh] min-h-[760px] z-0 overflow-hidden">
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          loop
+          playsInline
+          poster={asset("/media/hero.jpg")}
+          className="absolute inset-0 w-full h-full object-cover"
+        >
+          <source src={asset("/media/hero.mp4")} type="video/mp4" />
+        </video>
+        {/* Overlay: читаемость текста и плавный переход в тёмный фон терминала */}
+        <div className="absolute inset-0 bg-gradient-to-b from-[#07160a]/45 via-[#07160a]/25 to-[#07160a]" />
+      </div>
+
+      {/* Navigation Bar */}
+      <div className="absolute top-4 md:top-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-32px)] md:w-[90%] max-w-5xl">
+        <motion.nav initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.8, ease: "easeOut" as const }}>
+          <div className="relative flex items-center justify-between p-[8px] md:p-[10px] rounded-full bg-white/5 backdrop-blur-xl border border-white/10">
+            <a href="#" className="flex items-center gap-2.5 pl-1.5">
+              <img src={asset("/brand/emblem.png")} alt="АгроСфера" className="h-8 w-8 md:h-9 md:w-9 rounded-full ring-1 ring-white/20" />
+              <span className="text-white font-semibold tracking-[0.14em] text-[13px] md:text-[15px]">АГРОСФЕРА</span>
+            </a>
+
+            <div className="hidden md:flex items-center gap-8 absolute left-1/2 -translate-x-1/2 whitespace-nowrap">
+              {NAV.map((item) => (
+                <a key={item.href} href={item.href} className="text-[15px] font-medium text-white/70 hover:text-white transition-colors relative group">
+                  {item.label}
+                  <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-white transition-all group-hover:w-full" />
+                </a>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 md:gap-3">
+              <a href={botHref} className="hidden sm:block text-[15px] font-medium text-white/70 hover:text-white transition-colors px-3 py-2">
+                Подать цену
+              </a>
+              <a
+                href="#zayavka"
+                className="rounded-full px-4 md:px-5 py-2 text-sm md:text-[15px] font-semibold bg-white text-[#0d2410] hover:bg-white/90 transition-all hover:scale-105 active:scale-95"
+              >
+                Оставить заявку
+              </a>
+            </div>
+          </div>
+        </motion.nav>
+      </div>
+
+      {/* Hero Content */}
+      <div className="relative flex-1 flex flex-col items-center text-center px-4 md:px-6 pt-[128px] md:pt-[170px] pb-16 z-10">
+        <div className="flex flex-col items-center w-full">
+          <motion.span
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: "easeOut" as const }}
+            className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 backdrop-blur-md px-3.5 py-1.5 text-xs text-white/80"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-[#A6D86C] agr-pulse" />
+            Котировки масличного льна · обновляются в реальном времени
+          </motion.span>
+
+          <motion.h1
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1, ease: "easeOut" as const }}
+            className="text-center font-semibold text-[40px] sm:text-5xl md:text-6xl lg:text-[62px] leading-[1.08] tracking-[-0.02em] text-white max-w-4xl mt-0 mb-4"
+          >
+            Рынок льна
+            <br />в <span className="italic text-[#C3E79A]">реальных цифрах</span>
+          </motion.h1>
+
+          <motion.p
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.2, ease: "easeOut" as const }}
+            className="text-center text-base md:text-lg text-white/85 max-w-[560px] leading-relaxed mb-8"
+          >
+            Цены и свободные объёмы производителей — каждое утро, из первых рук. Выберите направление экспорта и регион с самой короткой логистикой.
+          </motion.p>
+
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.3, ease: "easeOut" as const }}
+            className="flex flex-col items-center gap-3"
+          >
+            <div className="flex flex-col sm:flex-row items-center gap-3">
+              <a
+                href="#terminal"
+                className="rounded-full px-8 py-4 text-base font-semibold bg-white/10 backdrop-blur-lg border border-white/20 text-white hover:bg-white/20 transition-all shadow-2xl hover:scale-105 active:scale-95"
+                style={{ boxShadow: "0 8px 32px 0 rgba(28, 80, 34, 0.45)" }}
+              >
+                Открыть котировки
+              </a>
+              <a href={botHref} className="rounded-full px-6 py-4 text-base font-medium text-white/80 hover:text-white transition-colors">
+                Я производитель — подать цену →
+              </a>
+            </div>
+            <span className="text-sm text-white/55">Бесплатно для участников рынка · без регистрации</span>
+          </motion.div>
+
+          <div className="mt-10 md:mt-12 w-full">
+            <Terminal />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}

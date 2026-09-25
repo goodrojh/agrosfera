@@ -1,36 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# АгроСфера — котировки масличного льна
 
-## Getting Started
+Инструмент прозрачности рынка: производители каждое утро присылают в бот (Telegram / MAX) цену за тонну и свободный объём, сайт в реальном времени показывает индекс, диапазон цен, объёмы и разбивку по регионам и направлениям экспорта (Китай, Казахстан и Ср. Азия, Каспий, Чёрное море).
 
-First, run the development server:
+## Структура
+
+| Путь | Что это |
+|---|---|
+| `app/`, `components/site/` | Сайт (Next.js, статический экспорт для GitHub Pages) |
+| `components/market/` | Терминал: график, симулятор бота, источник данных (демо или сервер) |
+| `lib/market/` | Общая логика сайта и бота: регионы, разбор сообщений, защита от ошибок, расчёт индекса |
+| `server/` | Бот Telegram + MAX, база SQLite, API для сайта (снимок + поток SSE + заявки) |
+
+## Защита от ошибочных цен
+
+- Бот повторяет, что понял. `30 150` → «Похоже, цена в тысячах: 30 → 30 000 ₽/т?» с кнопкой подтверждения; лишний ноль ловится так же.
+- Цена вне 10 000–100 000 ₽/т не принимается.
+- Отклонение от медианы региона больше 15% — переспрашиваем, больше 35% — цена уходит модератору (кнопки в админ-чате Telegram) и до проверки не участвует в индексе.
+- Индекс — медиана с отсечением выбросов (MAD), поэтому одиночная ошибка его не сдвигает.
+- Повторная отправка за день заменяет прежнюю цену предприятия, история сохраняется.
+
+Пороги — в `lib/market/validate.ts` (`LIMITS`).
+
+## Сайт локально
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Без `NEXT_PUBLIC_API_URL` сайт работает на **демо-данных** (плашка «демо-данные» в терминале): история за 90 дней и поток подач генерируются в браузере.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Деплой на GitHub Pages: `bash scripts/deploy-pages.sh` (собирает сайт и публикует в ветку `gh-pages`).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Автодеплой при каждом пуше: выполнить `gh auth refresh -s workflow`, затем переложить `deploy/github-actions-deploy.yml` в `.github/workflows/deploy.yml` и в настройках Pages выбрать источник «GitHub Actions».
 
-## Learn More
+## Запуск бота и API (сервер)
 
-To learn more about Next.js, take a look at the following resources:
+Нужен Node.js 22.13+ и сервер с HTTPS (сайт на https, поэтому API тоже должен быть https).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Создать бота в Telegram через [@BotFather](https://t.me/BotFather), получить токен.
+2. (Опционально) Создать бота в MAX на [платформе для партнёров](https://dev.max.ru), получить токен.
+3. Создать чат для менеджеров, добавить туда бота, узнать id чата — туда будут приходить заявки с сайта и цены на модерацию.
+4. На сервере:
+   ```bash
+   cd server
+   cp .env.example .env   # заполнить токены, ADMIN_CHAT_ID, CORS_ORIGIN
+   npm install
+   npm run selftest       # проверка диалога бота без мессенджеров
+   npm start
+   ```
+5. Завести предприятия и отправить им ссылки-приглашения:
+   ```bash
+   npm run admin -- regions
+   npm run admin -- add "ООО Лён Сибири" altai 2200000000
+   ```
+6. В репозитории: **Settings → Secrets and variables → Actions → Variables** добавить
+   `API_URL` (например `https://api.example.ru`), `TELEGRAM_BOT_URL`, `MAX_BOT_URL`, `CONTACT_EMAIL` и перезапустить workflow — сайт переключится с демо на живые данные. Без Actions — те же значения передать при ручном деплое: `NEXT_PUBLIC_API_URL=https://api.example.ru bash scripts/deploy-pages.sh`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Бот для предприятий
 
-## Deploy on Vercel
+- Сообщение: `ЦЕНА ОБЪЁМ`, например `31500 200`. Понимает и «32 500 руб 150 т», «цена 31 тыс, объём 300».
+- `/status` — моя цена сегодня, `/help` — формат.
+- В 9:00 по Москве (пн–сб) бот напоминает тем, кто ещё не прислал цену.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### API
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `GET /api/snapshot` — предприятия (анонимно: код и регион), подачи за сегодня, дневные закрытия за 90 дней.
+- `GET /api/stream` — SSE: события `quote`, `company`, `reset` (смена дня).
+- `POST /api/leads` — заявка с сайта (пересылается в админ-чат).
