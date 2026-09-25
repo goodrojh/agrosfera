@@ -126,12 +126,13 @@ export function startApi() {
         const regions = Array.isArray(body.regions) ? body.regions.filter((r: unknown) => typeof r === "string" && isRegionId(r)) : [];
         const name = clip(body.name, 120);
         const contact = clip(body.contact, 120);
+        const buyer = body.buyer === "agent" ? "agent" : "exporter";
         if (body.crop && body.crop !== "flax") return json(res, 400, { error: "Пока принимаем заявки только на лён" });
         const reference = computeIndex([...latestAccepted(quotes.ofDay(mskDay(Date.now()))).values()])?.index;
         const err = checkBid(price, volume, reference);
         if (err) return json(res, 400, { error: err });
         if (name.length < 2 || contact.length < 5) return json(res, 400, { error: "Укажите имя и телефон / Telegram" });
-        const bid = bids.insert({ crop: "flax", price, volume, regions, name, contact, ip });
+        const bid = bids.insert({ crop: "flax", price, volume, regions, buyer, name, contact, ip });
         publishBid(bid);
         notifyBid(bid, `${name} · ${contact}`);
         return json(res, 200, { ok: true, bid });

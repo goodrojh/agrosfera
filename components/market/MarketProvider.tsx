@@ -7,7 +7,7 @@ import { computeIndex, latestAccepted } from "@/lib/market/aggregate";
 import { checkBid } from "@/lib/market/validate";
 import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
 import type { RegionId } from "@/lib/market/regions";
-import type { Bid, Company, DailyClose, Quote } from "@/lib/market/types";
+import type { Bid, BuyerType, Company, DailyClose, Quote } from "@/lib/market/types";
 
 export const SIM_COMPANY_ID = "c-you";
 
@@ -29,6 +29,8 @@ interface MarketValue {
   bids: Bid[];
   /** Разместить заявку на покупку. Возвращает текст ошибки или null */
   submitBid: (input: BidInput) => Promise<string | null>;
+  /** Запрос на сделку по цене из стакана — приходит нам, сводим стороны сами */
+  submitDeal: (input: DealInput) => Promise<string | null>;
   /** Подача из симулятора бота — всегда по льну */
   submitFromSimulator: (regionId: RegionId, price: number, volume: number, moderation?: boolean) => Quote | null;
 }
@@ -37,6 +39,18 @@ export interface BidInput {
   price: number;
   volume: number;
   regions: RegionId[];
+  buyer: BuyerType;
+  name: string;
+  contact: string;
+}
+
+export interface DealInput {
+  /** buy — экспортёр/агент хочет купить по цене предприятия; sell — предприятие хочет продать по цене покупателя */
+  side: "buy" | "sell";
+  price: number;
+  volume: number;
+  role: "exporter" | "agent" | "producer";
+  region?: RegionId;
   name: string;
   contact: string;
 }
@@ -217,7 +231,16 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       if (input.name.trim().length < 2 || input.contact.trim().length < 5) return "Укажите имя или компанию и телефон / Telegram — чтобы мы могли связаться.";
 
       if (mode === "demo") {
-        pushBid(c, { id: `own${Date.now().toString(36)}`, price: input.price, volume: input.volume, regions: input.regions, at: Date.now(), status: "active", own: true });
+        pushBid(c, {
+          id: `own${Date.now().toString(36)}`,
+          price: input.price,
+          volume: input.volume,
+          regions: input.regions,
+          buyer: input.buyer,
+          at: Date.now(),
+          status: "active",
+          own: true,
+        });
         return null;
       }
       try {
@@ -252,6 +275,38 @@ export default function MarketProvider({ children }: { children: React.ReactNode
     [mode, pushTo]
   );
 
+  const submitDeal = useCallback(
+    async (input: DealInput): Promise<string | null> => {
+      if (!input.volume || input.volume < 1) return "Укажите объём.";
+      if (input.name.trim().length < 2 || input.contact.trim().length < 5) return "Укажите имя или компанию и телефон / Telegram.";
+      const cropName = CROP_BY_ID[cropRef.current].name;
+      const what = input.side === "buy" ? "Хочет купить по цене предприятия" : "Хочет продать по цене покупателя";
+      if (mode === "demo") {
+        await new Promise((r) => setTimeout(r, 400));
+        return null;
+      }
+      try {
+        const res = await fetch(`${API_URL}/api/leads`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            role: input.role,
+            name: input.name,
+            contact: input.contact,
+            target: input.region ?? "",
+            volume: input.volume,
+            comment: `${what}: ${input.price.toLocaleString("ru-RU")} ₽/т · ${cropName}`,
+          }),
+        });
+        if (!res.ok) return (await res.json().catch(() => ({}))).error ?? "Не удалось отправить";
+        return null;
+      } catch {
+        return "Нет связи с сервером. Попробуйте ещё раз.";
+      }
+    },
+    [mode]
+  );
+
   const companyById = useMemo(() => new Map(active.companies.map((c) => [c.id, c])), [active.companies]);
   const latest = useMemo(() => latestAccepted(active.today), [active.today]);
   const supported = mode === "demo" || crop === "flax";
@@ -272,9 +327,10 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       lastEventAt: active.lastEventAt,
       bids: active.bids,
       submitBid,
+      submitDeal,
       submitFromSimulator,
     }),
-    [ready, mode, connected, crop, setCrop, supported, active, companyById, latest, submitBid, submitFromSimulator]
+    [ready, mode, connected, crop, setCrop, supported, active, companyById, latest, submitBid, submitDeal, submitFromSimulator]
   );
 
   return <MarketContext.Provider value={value}>{children}</MarketContext.Provider>;

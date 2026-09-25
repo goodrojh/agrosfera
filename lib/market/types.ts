@@ -39,6 +39,10 @@ export interface DailyClose {
   volume: number;
 }
 
+export type BuyerType = "exporter" | "agent";
+
+export const BUYER_LABEL: Record<BuyerType, string> = { exporter: "экспортёр", agent: "агент" };
+
 /** Заявка покупателя в стакане. Контакты наружу не отдаются. */
 export interface Bid {
   id: string;
@@ -48,6 +52,8 @@ export interface Bid {
   volume: number;
   /** Из каких регионов готовы брать; пусто — из любых */
   regions: RegionId[];
+  /** Кто покупает */
+  buyer?: BuyerType;
   at: number;
   status: "active" | "removed";
   /** Заявка, оставленная в этом браузере */

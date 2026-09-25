@@ -6,6 +6,7 @@ import { useMarket } from "@/components/market/MarketProvider";
 import RegionPicker from "@/components/market/RegionPicker";
 import type { IndexStats } from "@/lib/market/aggregate";
 import type { RegionId } from "@/lib/market/regions";
+import type { BuyerType } from "@/lib/market/types";
 
 const field =
   "w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1F5A25]/15 focus:border-[#1F5A25]/40";
@@ -35,6 +36,7 @@ export default function BidDialog({
   const [price, setPrice] = useState(initialPrice ? String(initialPrice) : "");
   const [volume, setVolume] = useState(initialVolume ? String(initialVolume) : "");
   const [regions, setRegions] = useState<RegionId[]>(initialRegions);
+  const [buyer, setBuyer] = useState<BuyerType>("exporter");
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +56,7 @@ export default function BidDialog({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setState("sending");
-    const err = await submitBid({ price: Number(price), volume: Number(volume), regions, name, contact });
+    const err = await submitBid({ price: Number(price), volume: Number(volume), regions, buyer, name, contact });
     if (err) {
       setError(err);
       setState("form");
@@ -93,7 +95,23 @@ export default function BidDialog({
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 mt-5">
+            <div className="mt-5 flex bg-gray-100 p-1 rounded-xl" role="group" aria-label="Кто вы">
+              {(["exporter", "agent"] as const).map((r) => (
+                <button
+                  type="button"
+                  key={r}
+                  onClick={() => setBuyer(r)}
+                  className={
+                    "flex-1 py-2 text-sm rounded-lg transition-colors " +
+                    (buyer === r ? "bg-white text-gray-900 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-800")
+                  }
+                >
+                  {r === "exporter" ? "Я экспортёр" : "Я агент"}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-3">
               <label className="text-sm text-gray-600">
                 Цена, ₽/т
                 <input value={price} onChange={(e) => setPrice(digits(e.target.value))} inputMode="numeric" placeholder="30 000" className={field + " mt-1 tabular-nums"} autoFocus />

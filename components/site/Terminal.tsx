@@ -9,6 +9,7 @@ import RussiaMap from "@/components/market/RussiaMap";
 import RegionPicker from "@/components/market/RegionPicker";
 import OrderBook from "@/components/market/OrderBook";
 import BidDialog from "@/components/market/BidDialog";
+import DealDialog from "@/components/market/DealDialog";
 import { computeIndex, dailySeries, inScope, intradaySeries, lastHistoryDay, type IndexStats, type Scope } from "@/lib/market/aggregate";
 import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
 import { REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
@@ -85,7 +86,7 @@ function ChartPanel({
           ))}
         </div>
       </div>
-      <div className="h-[190px] md:h-[210px] mt-2">
+      <div className="h-[170px] md:h-[185px] mt-2">
         <PriceChart points={series} kind={period === "day" ? "intraday" : "daily"} animKey={`${period}-${(scope.regions ?? []).join(",")}`} />
       </div>
     </div>
@@ -173,6 +174,8 @@ export default function Terminal() {
   const [bidDraft, setBidDraft] = useState<{ price?: number; volume?: number } | null>(null);
   const closeMap = useCallback(() => setMapOpen(false), []);
   const closeBid = useCallback(() => setBidDraft(null), []);
+  const [deal, setDeal] = useState<{ side: "buy" | "sell"; price: number; volume?: number } | null>(null);
+  const closeDeal = useCallback(() => setDeal(null), []);
 
   const scope = useMemo<Scope>(() => ({ direction: "all", region: null, regions }), [regions]);
   const cropInfo = CROP_BY_ID[crop];
@@ -209,6 +212,8 @@ export default function Terminal() {
   };
 
   const s = live?.stats;
+  const bestAsk = live?.inS.length ? Math.min(...live.inS.map((q) => q.price)) : undefined;
+  const bestBid = scopedBids.length ? Math.max(...scopedBids.map((b) => b.price)) : undefined;
   const minCount = regions.length ? 1 : Math.max(3, Math.round((live?.total ?? 0) * 0.35));
   const producerHref = TELEGRAM_BOT_URL || "/sotrudnichestvo/#bot";
 
@@ -283,22 +288,44 @@ export default function Terminal() {
 
                 {/* Стакан */}
                 <div className="px-2 md:px-5 pt-4 pb-4 mt-2 border-t border-gray-100">
-                  {live && <OrderBook asks={live.inS} bids={scopedBids} onBuyAt={(price, volume) => setBidDraft({ price, volume })} />}
+                  {live && (
+                    <OrderBook
+                      asks={live.inS}
+                      bids={scopedBids}
+                      onBuyAt={(price, volume) => setDeal({ side: "buy", price, volume })}
+                      onSellAt={(price, volume) => setDeal({ side: "sell", price, volume })}
+                    />
+                  )}
 
-                  <div className="mt-3 px-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  {/* Действия: сделка через АгроСферу для каждой стороны + своя заявка в стакан */}
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-2 md:gap-3 px-1 md:px-0">
+                    <button
+                      disabled={!bestBid}
+                      onClick={() => bestBid && setDeal({ side: "sell", price: bestBid })}
+                      className="rounded-xl border border-[#2f7a1f]/30 px-4 py-2.5 text-sm font-semibold text-[#2f7a1f] hover:bg-[#f1f7ec] disabled:opacity-40 transition-colors text-left md:text-center"
+                    >
+                      Предприятию: продать покупателю
+                    </button>
                     <button
                       onClick={() => setBidDraft({})}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#2f7a1f] text-white px-4 py-2.5 text-sm font-semibold hover:bg-[#276719] transition-colors"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#1F5A25] text-white px-4 py-2.5 text-sm font-semibold hover:bg-[#174a1c] transition-colors"
                     >
-                      <Plus size={16} /> Заявка на покупку
+                      <Plus size={16} /> Поставить заявку в стакан
                     </button>
-                    <p className="text-xs text-gray-400 text-center sm:text-right">
-                      Нажмите на цену продавца, чтобы купить по ней ·{" "}
-                      <Link href={producerHref} className="text-[#c0492f] font-medium hover:underline">
-                        я производитель — подать цену
-                      </Link>
-                    </p>
+                    <button
+                      disabled={!bestAsk}
+                      onClick={() => bestAsk && setDeal({ side: "buy", price: bestAsk })}
+                      className="rounded-xl border border-[#c0492f]/30 px-4 py-2.5 text-sm font-semibold text-[#c0492f] hover:bg-[#fdf1ee] disabled:opacity-40 transition-colors text-left md:text-center"
+                    >
+                      Экспортёру и агенту: купить у предприятия
+                    </button>
                   </div>
+                  <p className="mt-2 text-[11px] text-gray-400 text-center">
+                    Нажмите на любую цену в стакане — сделку проведём через АгроСферу ·{" "}
+                    <Link href={producerHref} className="text-gray-500 underline underline-offset-2 hover:text-gray-800">
+                      подать цену предприятия в бот
+                    </Link>
+                  </p>
                 </div>
               </div>
             )}
@@ -315,6 +342,17 @@ export default function Terminal() {
             setMapOpen(false);
           }}
           onClose={closeMap}
+        />
+      )}
+      {deal && live && (
+        <DealDialog
+          side={deal.side}
+          price={deal.price}
+          volume={deal.volume}
+          cropName={cropInfo.name}
+          available={cropInfo.regions}
+          initialRegion={regions[0]}
+          onClose={closeDeal}
         />
       )}
       {bidDraft && live && (

@@ -222,6 +222,7 @@ export function createDemoMarket(now: number, opts: DemoOptions = {}): DemoMarke
       price,
       volume: Math.round((200 + rand() * 2800) / 50) * 50,
       regions: rand() < 0.5 ? [] : pick,
+      buyer: rand() < 0.6 ? "exporter" : "agent",
       at,
       status: "active",
     };

@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { config, mskDay } from "./config.ts";
-import type { Bid, Company, DailyClose, Quote, QuoteStatus } from "../../lib/market/types.ts";
+import type { Bid, BuyerType, Company, DailyClose, Quote, QuoteStatus } from "../../lib/market/types.ts";
 import type { RegionId } from "../../lib/market/regions.ts";
 
 export type Channel = "telegram" | "max";
@@ -64,6 +64,7 @@ db.exec(`
     price REAL NOT NULL,
     volume REAL NOT NULL,
     regions TEXT NOT NULL DEFAULT '[]',
+    buyer TEXT,
     name TEXT,
     contact TEXT,
     ip TEXT,
@@ -72,6 +73,13 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS reminders (day TEXT NOT NULL, company_id TEXT NOT NULL, PRIMARY KEY (day, company_id));
 `);
+
+// Базы, созданные до появления типа покупателя
+try {
+  db.exec("ALTER TABLE bids ADD COLUMN buyer TEXT");
+} catch {
+  // колонка уже есть
+}
 
 type Row = Record<string, string | number | null>;
 
@@ -211,19 +219,20 @@ const toBid = (r: Row): Bid => ({
   price: Number(r.price),
   volume: Number(r.volume),
   regions: JSON.parse(String(r.regions)),
+  buyer: r.buyer === "agent" ? "agent" : "exporter",
   at: Number(r.at),
   status: String(r.status) as Bid["status"],
 });
 
 /** Заявки покупателей. Наружу отдаём без контактов */
 export const bids = {
-  insert(b: { crop: string; price: number; volume: number; regions: RegionId[]; name: string; contact: string; ip: string }): Bid {
+  insert(b: { crop: string; price: number; volume: number; regions: RegionId[]; buyer: BuyerType; name: string; contact: string; ip: string }): Bid {
     const id = randomUUID();
     const at = Date.now();
-    db.prepare("INSERT INTO bids (id, crop, price, volume, regions, name, contact, ip, at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')").run(
-      id, b.crop, b.price, b.volume, JSON.stringify(b.regions), b.name, b.contact, b.ip, at
-    );
-    return { id, price: b.price, volume: b.volume, regions: b.regions, at, status: "active" };
+    db.prepare(
+      "INSERT INTO bids (id, crop, price, volume, regions, buyer, name, contact, ip, at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')"
+    ).run(id, b.crop, b.price, b.volume, JSON.stringify(b.regions), b.buyer, b.name, b.contact, b.ip, at);
+    return { id, price: b.price, volume: b.volume, regions: b.regions, buyer: b.buyer, at, status: "active" };
   },
   /** Активные заявки за последние 14 дней */
   active(crop = "flax"): Bid[] {

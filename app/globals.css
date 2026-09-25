@@ -56,6 +56,14 @@ body {
   pointer-events: none;
   animation: agr-flash 1.4s ease-out forwards;
 }
+@keyframes agr-flash-ask {
+  from { background-color: rgba(192, 73, 47, 0.18); }
+  to { background-color: rgba(192, 73, 47, 0); }
+}
+.agr-flash-ask {
+  pointer-events: none;
+  animation: agr-flash-ask 1.4s ease-out forwards;
+}
 
 /* Карта: подсветка при наведении средствами CSS, без перерисовки React */
 .agr-map-region,
@@ -81,7 +89,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agr-flash { animation: none; }
+  .agr-flash, .agr-flash-ask { animation: none; }
   .agr-pulse, .agr-ping { animation: none; }
   html { scroll-behavior: auto; }
 }

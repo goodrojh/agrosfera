@@ -76,7 +76,7 @@ export function startTelegram() {
       const kb = new InlineKeyboard().text("🗑 Снять со стакана", `bid:del:${b.id}`);
       const where = b.regions.length ? b.regions.join(", ") : "любые";
       void bot.api
-        .sendMessage(config.adminChatId, `🟢 Заявка на покупку\n${rub(b.price)} ₽/т · ${rub(b.volume)} т\nРегионы: ${where}\n${who}`, { reply_markup: kb })
+        .sendMessage(config.adminChatId, `🟢 Заявка на покупку (${b.buyer === "agent" ? "агент" : "экспортёр"})\n${rub(b.price)} ₽/т · ${rub(b.volume)} т\nРегионы: ${where}\n${who}`, { reply_markup: kb })
         .catch((e) => console.error(e.message));
     });
     setModerationNotifier((q, company) => {

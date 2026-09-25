@@ -25,7 +25,7 @@ export default function PriceChart({
     const el = wrapRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([e]) => {
-      setSize({ w: Math.max(260, e.contentRect.width), h: Math.max(220, e.contentRect.height) });
+      setSize({ w: Math.max(260, e.contentRect.width), h: Math.max(140, e.contentRect.height) });
     });
     ro.observe(el);
     return () => ro.disconnect();
