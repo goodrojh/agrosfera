@@ -230,7 +230,7 @@ export default function HowItWorks({ className }: { className?: string }) {
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
       transition={{ duration: 0.8 }}
-      className={"bg-[#f6f8f2] py-20 md:py-24 px-4 md:px-20 font-sans overflow-hidden scroll-mt-10 " + (className || "")}
+      className={"bg-white py-20 md:py-24 px-4 md:px-20 font-sans overflow-hidden scroll-mt-10 " + (className || "")}
     >
       <div className="max-w-[1200px] mx-auto">
         <div className="text-center mb-12 md:mb-16">

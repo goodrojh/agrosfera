@@ -2,7 +2,10 @@
 
 import React, { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import Terminal from "@/components/site/Terminal";
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { useMarket } from "@/components/market/MarketProvider";
+import { computeIndex, lastHistoryDay } from "@/lib/market/aggregate";
+import { pct, rub, tons } from "@/lib/market/format";
 import { asset, TELEGRAM_BOT_URL } from "@/lib/config";
 
 const NAV = [
@@ -21,10 +24,17 @@ export default function Hero({ className }: { className?: string }) {
 
   const botHref = TELEGRAM_BOT_URL || "#bot";
 
+  // Живая цена прямо на первом экране
+  const { ready, latest, history } = useMarket();
+  const now = ready ? computeIndex([...latest.values()]) : null;
+  const prevDay = lastHistoryDay(history);
+  const prev = computeIndex(history.filter((h) => h.day === prevDay));
+  const change = now && prev ? now.index / prev.index - 1 : null;
+
   return (
-    <section className={"min-h-[110vh] flex flex-col bg-[#07160a] relative " + (className || "")}>
+    <section className={"min-h-[88vh] md:min-h-[92vh] flex flex-col bg-[#07160a] relative overflow-hidden " + (className || "")}>
       {/* Video Background */}
-      <div className="absolute inset-x-0 top-0 h-[120vh] min-h-[760px] z-0 overflow-hidden">
+      <div className="absolute inset-0 z-0 overflow-hidden">
         <video
           ref={videoRef}
           autoPlay
@@ -36,8 +46,8 @@ export default function Hero({ className }: { className?: string }) {
         >
           <source src={asset("/media/hero.mp4")} type="video/mp4" />
         </video>
-        {/* Overlay: читаемость текста и плавный переход в тёмный фон терминала */}
-        <div className="absolute inset-0 bg-gradient-to-b from-[#07160a]/45 via-[#07160a]/25 to-[#07160a]" />
+        {/* Overlay для читаемости текста */}
+        <div className="absolute inset-0 bg-gradient-to-b from-[#07160a]/55 via-[#07160a]/35 to-[#07160a]/70" />
       </div>
 
       {/* Navigation Bar */}
@@ -74,7 +84,7 @@ export default function Hero({ className }: { className?: string }) {
       </div>
 
       {/* Hero Content */}
-      <div className="relative flex-1 flex flex-col items-center text-center px-4 md:px-6 pt-[128px] md:pt-[170px] pb-16 z-10">
+      <div className="relative flex-1 flex flex-col items-center text-center px-4 md:px-6 pt-[128px] md:pt-[170px] pb-16 z-10 justify-center">
         <div className="flex flex-col items-center w-full">
           <motion.span
             initial={{ opacity: 0, y: 12 }}
@@ -126,9 +136,27 @@ export default function Hero({ className }: { className?: string }) {
             <span className="text-sm text-white/55">Бесплатно для участников рынка · без регистрации</span>
           </motion.div>
 
-          <div className="mt-10 md:mt-12 w-full">
-            <Terminal />
-          </div>
+          {/* Живая цена */}
+          <motion.a
+            href="#terminal"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.45, ease: "easeOut" as const }}
+            className="mt-10 inline-flex flex-col sm:flex-row items-center gap-3 sm:gap-6 rounded-2xl bg-white px-6 py-4 shadow-2xl hover:scale-[1.02] transition-transform"
+          >
+            <span className="flex items-center gap-2 text-sm text-gray-500">
+              <span className="w-2 h-2 rounded-full bg-[#4f9a2a] agr-pulse" />
+              Лён масличный сегодня
+            </span>
+            <span className="text-2xl font-bold tabular-nums text-[#111]">{now ? `${rub(now.index)} ₽/т` : "—"}</span>
+            {change !== null && (
+              <span className={"inline-flex items-center gap-0.5 text-sm font-semibold tabular-nums " + (change >= 0 ? "text-[#2f7a1f]" : "text-[#c0492f]")}>
+                {change >= 0 ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />}
+                {pct(change)}
+              </span>
+            )}
+            <span className="text-sm text-gray-500 tabular-nums">{now ? `свободно ${tons(now.volume)}` : ""}</span>
+          </motion.a>
         </div>
       </div>
     </section>

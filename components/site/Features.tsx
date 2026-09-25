@@ -55,7 +55,7 @@ const RULES = [
 
 export default function Features({ className }: { className?: string }) {
   return (
-    <section id="metodika" className={"bg-white py-20 md:py-24 px-4 md:px-12 font-sans overflow-hidden " + (className || "")}>
+    <section id="metodika" className={"bg-[#f6f8f2] py-20 md:py-24 px-4 md:px-12 font-sans overflow-hidden " + (className || "")}>
       <div className="max-w-7xl mx-auto relative">
         <div className="mb-12 md:mb-16 relative">
           <div className="grid md:grid-cols-2 gap-6 md:gap-12 items-end">
@@ -80,7 +80,7 @@ export default function Features({ className }: { className?: string }) {
           </div>
         </div>
 
-        <div className="relative border border-gray-200 rounded-[24px] md:rounded-[32px] overflow-hidden bg-gray-50/30">
+        <div className="relative border border-gray-200 rounded-[24px] md:rounded-[32px] overflow-hidden bg-white">
           <div className="grid grid-cols-1 md:grid-cols-4 md:min-h-[640px]">
             {/* Бот */}
             <FeatureCard
