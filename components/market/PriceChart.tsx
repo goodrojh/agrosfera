@@ -105,9 +105,12 @@ export default function PriceChart({
           {geo.ticksY.map((v) => (
             <g key={v}>
               <line x1={PAD.left} x2={PAD.left + geo.plotW} y1={geo.y(v)} y2={geo.y(v)} stroke="#eef1ea" />
-              <text x={geo.w - 6} y={geo.y(v) + 4} textAnchor="end" fontSize={12} fill="#8a9486" className="tabular-nums">
-                {rub(v)}
-              </text>
+              {/* Подпись оси прячем, если она под ценником текущей цены */}
+              {Math.abs(geo.y(v) - geo.y(geo.last.index)) > 16 && (
+                <text x={geo.w - 6} y={geo.y(v) + 4} textAnchor="end" fontSize={12} fill="#8a9486" className="tabular-nums">
+                  {rub(v)}
+                </text>
+              )}
             </g>
           ))}
 

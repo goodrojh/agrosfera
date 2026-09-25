@@ -84,7 +84,7 @@ export default function RegionPicker({
           aria-controls={listId}
           aria-autocomplete="list"
           value={open ? query : value ? REGION_BY_ID[value].name : ""}
-          placeholder={value ? REGION_BY_ID[value].name : "Все регионы — введите название"}
+          placeholder={value ? REGION_BY_ID[value].name : "Все регионы"}
           onChange={(e) => {
             setQuery(e.target.value);
             setActive(0);
