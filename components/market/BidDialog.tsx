@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import { useMarket } from "@/components/market/MarketProvider";
+import { useAccount } from "@/lib/account";
 import RegionPicker from "@/components/market/RegionPicker";
 import type { IndexStats } from "@/lib/market/aggregate";
 import type { RegionId } from "@/lib/market/regions";
@@ -33,6 +34,8 @@ export default function BidDialog({
   onClose: () => void;
 }) {
   const { submitBid, mode } = useMarket();
+  const { account } = useAccount();
+  const live = mode === "live";
   const [price, setPrice] = useState(initialPrice ? String(initialPrice) : "");
   const [volume, setVolume] = useState(initialVolume ? String(initialVolume) : "");
   const [regions, setRegions] = useState<RegionId[]>(initialRegions);
@@ -56,7 +59,7 @@ export default function BidDialog({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setState("sending");
-    const err = await submitBid({ price: Number(price), volume: Number(volume), regions, buyer, name, contact });
+    const err = await submitBid({ price: Number(price), volume: Number(volume), regions, buyer: account?.role === "agent" ? "agent" : buyer, name, contact });
     if (err) {
       setError(err);
       setState("form");
@@ -81,7 +84,8 @@ export default function BidDialog({
               {mode === "live" ? "Менеджер проверит её и поставит в стакан — обычно в течение часа в рабочее время. " : ""}
               {bestAsk && Number(price) >= bestAsk
                 ? "Ваша цена совпала с ценой продавца — менеджер свяжется с вами для сделки."
-                : "Производители её видят. Мы свяжемся с вами, как найдём объём."}
+                : "Производители её видят. Когда цена предприятия совпадёт с вашей, менеджер свяжется с вами."}
+              {live && " Статус заявки — в личном кабинете."}
             </p>
           </div>
         ) : (
@@ -89,13 +93,16 @@ export default function BidDialog({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-lg font-semibold text-gray-900">Заявка на покупку</p>
-                <p className="text-sm text-gray-500">{cropName} · ₽/т с НДС, самовывоз</p>
+                <p className="text-sm text-gray-500">
+                  {cropName} · ₽/т с НДС, самовывоз{live && account ? ` · ${account.name}` : ""}
+                </p>
               </div>
               <button type="button" onClick={onClose} aria-label="Закрыть" className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100">
                 <X size={18} />
               </button>
             </div>
 
+            {!live && (
             <div className="mt-5 flex bg-gray-100 p-1 rounded-xl" role="group" aria-label="Кто вы">
               {(["exporter", "agent"] as const).map((r) => (
                 <button
@@ -111,6 +118,7 @@ export default function BidDialog({
                 </button>
               ))}
             </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3 mt-3">
               <label className="text-sm text-gray-600">
@@ -130,10 +138,12 @@ export default function BidDialog({
               </div>
             </div>
 
+            {!live && (
             <div className="grid grid-cols-2 gap-3 mt-3">
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Имя или компания" className={field} />
               <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Телефон или @telegram" className={field} />
             </div>
+            )}
 
             {error && <p className="mt-3 text-sm text-[#c0492f]">{error}</p>}
 
@@ -145,7 +155,7 @@ export default function BidDialog({
               {state === "sending" ? "Отправляем…" : "Поставить заявку в стакан"}
             </button>
             <p className="mt-3 text-xs text-gray-400 text-center">
-              Заявки проверяет менеджер. В стакане видны только цена и объём, контакты — только нам.
+              Заявки проверяет менеджер. В стакане видны только цена и объём, ваша компания — только нам.
               {mode === "demo" && " Сейчас демо-режим: заявка сохраняется только у вас в браузере."}
             </p>
           </form>

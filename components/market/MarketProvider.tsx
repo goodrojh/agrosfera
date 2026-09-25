@@ -2,6 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "@/lib/config";
+import { api } from "@/lib/account";
 import { createDemoMarket, type DemoMarket } from "@/lib/market/demo";
 import { computeIndex, latestAccepted } from "@/lib/market/aggregate";
 import { checkBid } from "@/lib/market/validate";
@@ -53,6 +54,7 @@ export interface DealInput {
   region?: RegionId;
   name: string;
   contact: string;
+  comment?: string;
 }
 
 interface CropStore {
@@ -234,9 +236,8 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       const reference = computeIndex([...latestAccepted(st.today).values()])?.index;
       const err = checkBid(input.price, input.volume, reference);
       if (err) return err;
-      if (input.name.trim().length < 2 || input.contact.trim().length < 5) return "Укажите имя или компанию и телефон / Telegram — чтобы мы могли связаться.";
-
       if (mode === "demo") {
+        if (input.name.trim().length < 2 || input.contact.trim().length < 5) return "Укажите имя или компанию и телефон / Telegram — чтобы мы могли связаться.";
         pushBid(c, {
           id: `own${Date.now().toString(36)}`,
           price: input.price,
@@ -249,18 +250,12 @@ export default function MarketProvider({ children }: { children: React.ReactNode
         });
         return null;
       }
+      // Заявка от имени компании из кабинета: ждёт проверки менеджером и появится в стакане после подтверждения
       try {
-        const res = await fetch(`${API_URL}/api/bids`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ crop: c, ...input }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) return data.error ?? "Не удалось отправить заявку";
-        // Заявка ждёт проверки модератором и появится в стакане после подтверждения
+        await api("/api/cabinet/bids", { crop: c, price: input.price, volume: input.volume, regions: input.regions });
         return null;
-      } catch {
-        return "Нет связи с сервером. Попробуйте ещё раз.";
+      } catch (e) {
+        return (e as Error).message;
       }
     },
     [mode, pushBid]
@@ -284,30 +279,16 @@ export default function MarketProvider({ children }: { children: React.ReactNode
   const submitDeal = useCallback(
     async (input: DealInput): Promise<string | null> => {
       if (!input.volume || input.volume < 1) return "Укажите объём.";
-      if (input.name.trim().length < 2 || input.contact.trim().length < 5) return "Укажите имя или компанию и телефон / Telegram.";
-      const cropName = CROP_BY_ID[cropRef.current].name;
-      const what = input.side === "buy" ? "Хочет купить по цене предприятия" : "Хочет продать по цене покупателя";
       if (mode === "demo") {
+        if (input.name.trim().length < 2 || input.contact.trim().length < 5) return "Укажите имя или компанию и телефон / Telegram.";
         await new Promise((r) => setTimeout(r, 400));
         return null;
       }
       try {
-        const res = await fetch(`${API_URL}/api/leads`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            role: input.role,
-            name: input.name,
-            contact: input.contact,
-            target: input.region ?? "",
-            volume: input.volume,
-            comment: `${what}: ${input.price.toLocaleString("ru-RU")} ₽/т · ${cropName}`,
-          }),
-        });
-        if (!res.ok) return (await res.json().catch(() => ({}))).error ?? "Не удалось отправить";
+        await api("/api/cabinet/deal", { side: input.side, crop: cropRef.current, price: input.price, volume: input.volume, comment: input.comment ?? "" });
         return null;
-      } catch {
-        return "Нет связи с сервером. Попробуйте ещё раз.";
+      } catch (e) {
+        return (e as Error).message;
       }
     },
     [mode]

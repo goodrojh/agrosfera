@@ -55,6 +55,10 @@
   .b-active { background: #e8f3e0; color: var(--brand); }
   .b-blocked { background: #f1f1f1; color: #777; }
   .b-pending { background: #fff4e0; color: var(--amber); }
+  .role { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 6px; margin-left: 6px; vertical-align: 1px; }
+  .r-producer { background: #fdeee9; color: var(--red); }
+  .r-exporter, .r-agent { background: #e8f3e0; color: var(--brand); }
+  .hl { background: #fff8e6; }
   .chip { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 8px; background: #eef3e8; color: var(--brand); margin: 0 4px 4px 0; }
 
   .btn { border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 8px 14px; cursor: pointer; color: var(--text); }
@@ -174,6 +178,8 @@ $("#logout").addEventListener("click", logout);
 
 const cropName = (id) => data.crops.find((c) => c.id === id)?.name || id;
 const regionName = (id) => data.regions.find((r) => r.id === id)?.name || id;
+const ROLE = { producer: "предприятие", exporter: "экспортёр", agent: "агент" };
+const roleTag = (r) => `<span class="role r-${r}">${ROLE[r] || r}</span>`;
 const STATUS = { new: ["Новая анкета", "b-new"], active: ["Доступ открыт", "b-active"], blocked: ["Отключён", "b-blocked"] };
 const badge = (s) => `<span class="badge ${STATUS[s][1]}">${STATUS[s][0]}</span>`;
 
@@ -188,17 +194,27 @@ function render() {
   const fresh = data.companies.filter((c) => c.status === "new");
   const partners = data.companies.filter((c) => c.status !== "new");
   const pendingBids = data.bids.filter((b) => b.status === "pending");
+  const freshMatches = data.matches.filter((m) => m.status === "new");
   const tabs = [
     ["new", "Анкеты", fresh.length, fresh.length > 0],
+    ["matches", "Совпадения", freshMatches.length, freshMatches.length > 0],
     ["partners", "Участники", partners.length, false],
     ["bids", "Заявки покупателей", pendingBids.length, pendingBids.length > 0],
     ["moderation", "Цены на проверке", data.moderation.length, data.moderation.length > 0],
-    ["leads", "Обращения", data.leads.length, false],
+    ["leads", "Запросы на сделку", data.leads.length, false],
   ];
   $("#tabs").innerHTML = tabs.map(([id, label, n, hot]) => `<button class="tab ${tab === id ? "on" : ""}" data-tab="${id}">${label}<b class="${hot && tab !== id ? "hot" : ""}">${n}</b></button>`).join("");
-  $("#view").innerHTML = { new: viewNew, partners: viewPartners, bids: viewBids, moderation: viewModeration, leads: viewLeads }[tab](fresh, partners);
+  $("#view").innerHTML = { new: viewNew, matches: viewMatches, partners: viewPartners, bids: viewBids, moderation: viewModeration, leads: viewLeads }[tab](fresh, partners);
   if (openId) renderDrawer();
 }
+
+$("#view").addEventListener("change", async (e) => {
+  const sel = e.target.closest("[data-mstatus]");
+  if (!sel) return;
+  await api(`/api/admin/matches/${sel.dataset.mstatus}`, { method: "PATCH", body: JSON.stringify({ status: sel.value }) }).catch((err) => toast(err.message));
+  toast("Статус обновлён");
+  load();
+});
 
 $("#tabs").addEventListener("click", (e) => {
   const b = e.target.closest("[data-tab]");
@@ -206,11 +222,11 @@ $("#tabs").addEventListener("click", (e) => {
 });
 
 function companyRow(c) {
-  const bot = c.members.length ? `<span class="badge b-active">✓ подключён</span>` : `<span class="sub">не подключён</span>`;
+  const bot = c.role !== "producer" ? `<span class="sub">${esc(c.email || "")}</span>` : c.members.length ? `<span class="badge b-active">✓ бот подключён</span>` : `<span class="sub">бот не подключён</span>`;
   return `<tr class="click" data-open="${c.id}">
-    <td><b>${esc(c.name)}</b><div class="sub">${esc(c.code)} · ${c.inn ? "ИНН " + esc(c.inn) : '<span style="color:var(--red)">ИНН не указан</span>'}</div></td>
+    <td><b>${esc(c.name)}</b>${roleTag(c.role)}<div class="sub">${esc(c.code)} · ${c.inn ? "ИНН " + esc(c.inn) : '<span style="color:var(--red)">ИНН не указан</span>'}</div></td>
     <td class="hide-sm">${esc(regionName(c.regionId))}</td>
-    <td>${c.crops.map((x) => `<span class="chip">${esc(cropName(x))}</span>`).join("") || '<span class="sub">не закреплены</span>'}</td>
+    <td>${c.role !== "producer" ? '<span class="sub">покупатель</span>' : c.crops.map((x) => `<span class="chip">${esc(cropName(x))}</span>`).join("") || '<span class="sub">не закреплены</span>'}</td>
     <td class="hide-sm">${esc(c.person || "")}<div class="sub">${esc(c.phone || "")}</div></td>
     <td>${badge(c.status)}<div style="margin-top:4px">${bot}</div></td>
   </tr>`;
@@ -218,7 +234,7 @@ function companyRow(c) {
 
 function viewNew(fresh) {
   return `<div class="panel">
-    <div class="panel-head"><div><h2>Новые анкеты</h2><p>Пришли с сайта. Позвоните, уточните культуры и объёмы, затем откройте доступ в карточке.</p></div></div>
+    <div class="panel-head"><div><h2>Новые анкеты</h2><p>Регистрации с сайта: предприятия, экспортёры, агенты. Позвоните, проверьте компанию, у предприятия отметьте культуры — и откройте доступ в карточке.</p></div></div>
     ${fresh.length ? `<table><thead><tr><th>Предприятие</th><th class="hide-sm">Регион</th><th>Культуры из анкеты</th><th class="hide-sm">Контакт</th><th>Статус</th></tr></thead><tbody>${fresh.map(companyRow).join("")}</tbody></table>`
       : '<div class="empty">Новых анкет нет</div>'}
   </div>`;
@@ -252,6 +268,28 @@ function viewBids() {
   </div>`;
 }
 
+const MSTATUS = { new: "Новое", working: "В работе", done: "Сделка", rejected: "Отказ" };
+function side(p) {
+  if (!p) return '<span class="sub">без аккаунта</span>';
+  return `<b>${esc(p.name)}</b>${roleTag(p.role)}<div class="sub">${esc([p.person, p.phone, p.email].filter(Boolean).join(" · "))}</div>`;
+}
+function viewMatches() {
+  return `<div class="panel">
+    <div class="panel-head"><div><h2>Совпадения цен</h2><p>Покупатель готов заплатить не меньше цены предприятия. Свяжитесь со сторонами; «Сообщить сторонам» — предприятию в бот и обоим в личный кабинет.</p></div></div>
+    ${data.matches.length ? `<table><thead><tr><th>Когда</th><th>Культура</th><th>Покупатель</th><th>Предприятие</th><th>Цены, ₽/т</th><th>Статус</th><th></th></tr></thead><tbody>
+      ${data.matches.map((m) => `<tr class="${m.status === "new" ? "hl" : ""}">
+        <td class="num">${date(m.createdAt)}</td>
+        <td>${esc(cropName(m.crop))}<div class="sub">${esc(regionName(m.regionId))}</div></td>
+        <td>${side(m.buyer)}<div class="sub num">хочет ${rub(m.bidVolume)} т</div></td>
+        <td>${side(m.seller)}<div class="sub num">продаёт ${rub(m.askVolume)} т</div></td>
+        <td class="num">покупка <b>${rub(m.bidPrice)}</b><br/>продажа <b>${rub(m.askPrice)}</b><div class="sub" style="color:var(--brand)">+${rub(m.bidPrice - m.askPrice)}</div></td>
+        <td><select data-mstatus="${m.id}">${Object.entries(MSTATUS).map(([k, v]) => `<option value="${k}" ${k === m.status ? "selected" : ""}>${v}</option>`).join("")}</select>
+          ${m.notified ? '<div class="sub" style="margin-top:4px">✓ стороны уведомлены</div>' : ""}</td>
+        <td>${m.notified ? "" : `<button class="btn primary sm" data-notify="${m.id}">Сообщить сторонам</button>`}</td>
+      </tr>`).join("")}</tbody></table>` : '<div class="empty">Совпадений пока нет. Они появятся, как только заявка покупателя окажется не ниже цены предприятия.</div>'}
+  </div>`;
+}
+
 function viewModeration() {
   return `<div class="panel">
     <div class="panel-head"><div><h2>Цены на проверке</h2><p>Цены, заметно отличающиеся от рынка. До решения в котировку не входят.</p></div></div>
@@ -281,8 +319,16 @@ $("#view").addEventListener("click", async (e) => {
   const bid = e.target.closest("[data-bid]");
   if (bid) {
     bid.disabled = true;
-    await api(`/api/admin/bids/${bid.dataset.bid}/${bid.dataset.act}`, { method: "POST" }).catch((err) => toast(err.message));
-    toast(bid.dataset.act === "approve" ? "Заявка в стакане" : "Заявка снята");
+    const r = await api(`/api/admin/bids/${bid.dataset.bid}/${bid.dataset.act}`, { method: "POST" }).catch((err) => (toast(err.message), null));
+    toast(bid.dataset.act !== "approve" ? "Заявка снята" : r?.matches ? `Заявка в стакане · найдено совпадений: ${r.matches}` : "Заявка в стакане");
+    if (r?.matches) tab = "matches";
+    return load();
+  }
+  const nt = e.target.closest("[data-notify]");
+  if (nt) {
+    nt.disabled = true;
+    try { const r = await api(`/api/admin/matches/${nt.dataset.notify}/notify`, { method: "POST" }); toast(r.bot ? "Стороны уведомлены (предприятию — в бот)" : "Уведомлено в личных кабинетах"); }
+    catch (err) { toast(err.message); }
     return load();
   }
   const q = e.target.closest("[data-quote]");
@@ -298,7 +344,7 @@ $("#view").addEventListener("click", async (e) => {
 function renderDrawer() {
   const isNew = openId === "new";
   const c = isNew
-    ? { name: "", inn: "", regionId: data.regions[0].id, person: "", phone: "", crops: [], notes: "", status: "new", members: [], code: "новый", inviteLink: null }
+    ? { role: "producer", email: "", name: "", inn: "", regionId: data.regions[0].id, person: "", phone: "", crops: [], notes: "", status: "new", members: [], code: "новый", inviteLink: null }
     : data.companies.find((x) => x.id === openId);
   if (!c) { closeDrawer(); return; }
   // Не перерисовываем открытую карточку при фоновом обновлении, чтобы не потерять ввод
@@ -308,16 +354,18 @@ function renderDrawer() {
     <div class="scrim" data-close></div>
     <aside class="drawer">
       <div class="drawer-head">
-        <div><h3>${esc(c.name || "Новый участник")}</h3><div class="sub">${esc(c.code)} ${isNew ? "" : "· " + badge(c.status)}</div></div>
+        <div><h3>${esc(c.name || "Новый участник")}${isNew ? "" : roleTag(c.role)}</h3><div class="sub">${esc(c.code)} ${isNew ? "" : "· " + badge(c.status)}</div></div>
         <button class="btn sm" data-close>✕</button>
       </div>
       <div class="drawer-body">
         ${isNew ? "" : `<div class="box">
           <label class="access"><input type="checkbox" id="fAccess" ${c.status === "active" ? "checked" : ""} />
-            <span><b>Доступ открыт</b><span class="sub">Бот принимает цены и каждое утро спрашивает их по закреплённым культурам. Снимите галочку, чтобы отключить.</span></span>
+            <span><b>Доступ открыт</b><span class="sub">${c.role === "producer" ? "Может подавать цены в личном кабинете и в боте; бот каждое утро спрашивает цены по закреплённым культурам." : "Может ставить заявки на покупку и запрашивать сделки в личном кабинете."} Снимите галочку, чтобы отключить.</span></span>
           </label>
         </div>`}
-        <div class="box">
+        ${isNew ? `<div class="box"><h4>Роль</h4><select id="fRole"><option value="producer">Предприятие (продаёт)</option><option value="exporter">Экспортёр (покупает)</option><option value="agent">Агент (покупает)</option></select>
+          <label class="f" style="margin-top:10px">Email для входа в кабинет (необязательно)<input type="text" id="fEmail" /></label></div>` : ""}
+        <div class="box" ${!isNew && c.role !== "producer" ? 'style="display:none"' : ""}>
           <h4>Культуры участника</h4>
           <div class="crops">${data.crops.map((x) => `<label><input type="checkbox" name="crop" value="${x.id}" ${c.crops.includes(x.id) ? "checked" : ""}/>${esc(x.name)}</label>`).join("")}</div>
         </div>
@@ -334,6 +382,12 @@ function renderDrawer() {
           </div>
         </div>
         ${isNew ? "" : `<div class="box">
+          <h4>Личный кабинет</h4>
+          <div class="sub" style="margin-bottom:8px">Логин: ${esc(c.email || "не задан")}. ${c.hasPassword ? "Пароль задан." : "Пароль не задан."}</div>
+          <button class="btn sm" data-resetpw>Сбросить пароль</button>
+          <div id="pwBox" class="sub" style="margin-top:8px"></div>
+        </div>`}
+        ${isNew || c.role !== "producer" ? "" : `<div class="box">
           <h4>Telegram-бот</h4>
           ${c.members.length
             ? c.members.map((m) => `<div>✓ ${esc(m.name || m.userId)} <span class="sub">(${m.channel === "max" ? "MAX" : "Telegram"})</span></div>`).join("")
@@ -366,6 +420,14 @@ $("#drawerRoot").addEventListener("click", async (e) => {
     try { await navigator.clipboard.writeText(v); } catch { $("#fInvite").select(); document.execCommand("copy"); }
     return toast("Ссылка скопирована");
   }
+  if (e.target.closest("[data-resetpw]")) {
+    if (!confirm("Сбросить пароль? Участник войдёт с временным паролем, который вы ему передадите.")) return;
+    try {
+      const r = await api(`/api/admin/companies/${openId}/password`, { method: "POST" });
+      $("#pwBox").innerHTML = `Временный пароль: <b style="font-size:15px;color:var(--text)">${esc(r.password)}</b> — передайте участнику, он сможет сменить его в кабинете.`;
+    } catch (err) { toast(err.message); }
+    return;
+  }
   if (e.target.closest("[data-ask]")) {
     try { const r = await api(`/api/admin/companies/${openId}/ask`, { method: "POST" }); toast(`Запрос отправлен (${r.sent})`); }
     catch (err) { toast(err.message); }
@@ -383,6 +445,8 @@ $("#drawerRoot").addEventListener("click", async (e) => {
     };
     try {
       if (openId === "new") {
+        body.role = $("#fRole").value;
+        body.email = $("#fEmail").value;
         const r = await api("/api/admin/companies", { method: "POST", body: JSON.stringify(body) });
         toast("Участник создан");
         openId = r.id;
@@ -391,7 +455,7 @@ $("#drawerRoot").addEventListener("click", async (e) => {
         const cur = data.companies.find((x) => x.id === openId);
         const access = $("#fAccess").checked;
         body.status = access ? "active" : cur.status === "active" ? "blocked" : cur.status;
-        if (access && !body.crops.length) { $("#drawerErr").textContent = "Отметьте хотя бы одну культуру — по ним бот будет спрашивать цены."; return; }
+        if (access && cur.role === "producer" && !body.crops.length) { $("#drawerErr").textContent = "Отметьте хотя бы одну культуру — по ним бот будет спрашивать цены."; return; }
         await api(`/api/admin/companies/${openId}`, { method: "PATCH", body: JSON.stringify(body) });
         toast(access && cur.status !== "active" ? "Доступ открыт" : "Сохранено");
         delete $("#drawerRoot").dataset.id;

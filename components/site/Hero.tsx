@@ -86,10 +86,10 @@ export default function Hero({ className }: { className?: string }) {
                 Подать цену
               </a>
               <a
-                href={asset("/sotrudnichestvo/#zayavka")}
+                href={asset("/kabinet/")}
                 className="rounded-full px-4 md:px-5 py-2 text-sm md:text-[15px] font-semibold bg-white text-[#0d2410] hover:bg-white/90 transition-all hover:scale-105 active:scale-95"
               >
-                Оставить заявку
+                Личный кабинет
               </a>
             </div>
           </div>

@@ -11,6 +11,8 @@ import OrderBook from "@/components/market/OrderBook";
 import BidDialog from "@/components/market/BidDialog";
 import DealDialog from "@/components/market/DealDialog";
 import GuideDialog from "@/components/market/GuideDialog";
+import AuthPrompt, { type Gate } from "@/components/account/AuthPrompt";
+import { CABINET_URL, useAccount } from "@/lib/account";
 import { computeIndex, dailySeries, inScope, intradaySeries, lastHistoryDay, type IndexStats, type Scope } from "@/lib/market/aggregate";
 import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
 import { REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
@@ -178,6 +180,25 @@ export default function Terminal() {
   const closeDeal = useCallback(() => setDeal(null), []);
   const [guideOpen, setGuideOpen] = useState(false);
   const closeGuide = useCallback(() => setGuideOpen(false), []);
+  const { account } = useAccount();
+  const [prompt, setPrompt] = useState<Gate | null>(null);
+  const closePrompt = useCallback(() => setPrompt(null), []);
+
+  /** В боевом режиме действовать может только вошедший и проверенный участник нужной роли */
+  const allowed = (action: Gate["action"]) => {
+    if (mode === "demo") return true;
+    const need = action === "sell" ? "producer" : "buyer";
+    const reason: Gate["reason"] | null = !account
+      ? "guest"
+      : account.status !== "active"
+        ? "pending"
+        : (need === "producer") !== (account.role === "producer")
+          ? "role"
+          : null;
+    if (reason) setPrompt({ action, reason });
+    return !reason;
+  };
+  const openDeal = (side: "buy" | "sell", price: number, volume?: number) => allowed(side) && setDeal({ side, price, volume });
 
   const scope = useMemo<Scope>(() => ({ direction: "all", region: null, regions }), [regions]);
   const cropInfo = CROP_BY_ID[crop];
@@ -218,7 +239,7 @@ export default function Terminal() {
   const bestBid = scopedBids.length ? Math.max(...scopedBids.map((b) => b.price)) : undefined;
   const minCount = regions.length ? 1 : Math.max(3, Math.round((live?.total ?? 0) * 0.35));
   // Производитель попадает в бот только после анкеты и проверки менеджером
-  const producerHref = "/sotrudnichestvo/?role=producer#zayavka";
+  const producerHref = "/kabinet/?role=producer";
 
   return (
     <section id="terminal" className="bg-white py-6 md:py-8 px-4 md:px-8 scroll-mt-0">
@@ -302,8 +323,8 @@ export default function Terminal() {
                     <OrderBook
                       asks={live.inS}
                       bids={scopedBids}
-                      onBuyAt={(price, volume) => setDeal({ side: "buy", price, volume })}
-                      onSellAt={(price, volume) => setDeal({ side: "sell", price, volume })}
+                      onBuyAt={(price, volume) => openDeal("buy", price, volume)}
+                      onSellAt={(price, volume) => openDeal("sell", price, volume)}
                     />
                   )}
 
@@ -311,20 +332,20 @@ export default function Terminal() {
                   <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-2 md:gap-3 px-1 md:px-0">
                     <button
                       disabled={!bestBid}
-                      onClick={() => bestBid && setDeal({ side: "sell", price: bestBid })}
+                      onClick={() => bestBid && openDeal("sell", bestBid)}
                       className="rounded-xl border border-[#2f7a1f]/30 px-4 py-2.5 text-sm font-semibold text-[#2f7a1f] hover:bg-[#f1f7ec] disabled:opacity-40 transition-colors text-left md:text-center"
                     >
                       Предприятию: продать покупателю
                     </button>
                     <button
-                      onClick={() => setBidDraft({})}
+                      onClick={() => allowed("bid") && setBidDraft({})}
                       className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#1F5A25] text-white px-4 py-2.5 text-sm font-semibold hover:bg-[#174a1c] transition-colors"
                     >
                       <Plus size={16} /> Поставить заявку в стакан
                     </button>
                     <button
                       disabled={!bestAsk}
-                      onClick={() => bestAsk && setDeal({ side: "buy", price: bestAsk })}
+                      onClick={() => bestAsk && openDeal("buy", bestAsk)}
                       className="rounded-xl border border-[#c0492f]/30 px-4 py-2.5 text-sm font-semibold text-[#c0492f] hover:bg-[#fdf1ee] disabled:opacity-40 transition-colors text-left md:text-center"
                     >
                       Экспортёру и агенту: купить у предприятия
@@ -332,9 +353,15 @@ export default function Terminal() {
                   </div>
                   <p className="mt-2 text-[11px] text-gray-400 text-center">
                     Нажмите на любую цену в стакане — сделку проведём через АгроСферу ·{" "}
-                    <Link href={producerHref} className="text-gray-500 underline underline-offset-2 hover:text-gray-800">
-                      предприятию: подать анкету
-                    </Link>
+                    {mode === "live" ? (
+                      <a href={CABINET_URL} className="text-gray-500 underline underline-offset-2 hover:text-gray-800">
+                        {account ? "личный кабинет" : "войти или зарегистрироваться"}
+                      </a>
+                    ) : (
+                      <Link href={producerHref} className="text-gray-500 underline underline-offset-2 hover:text-gray-800">
+                        предприятию: зарегистрироваться
+                      </Link>
+                    )}
                   </p>
                 </div>
               </div>
@@ -355,6 +382,7 @@ export default function Terminal() {
         />
       )}
       {guideOpen && <GuideDialog onClose={closeGuide} />}
+      {prompt && <AuthPrompt gate={prompt} account={account} onClose={closePrompt} />}
       {deal && live && (
         <DealDialog
           side={deal.side}

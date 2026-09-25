@@ -12,7 +12,14 @@ export type Channel = "telegram" | "max";
 /** new — анкета с сайта ждёт проверки; active — доступ открыт; blocked — отключён */
 export type CompanyStatus = "new" | "active" | "blocked";
 
+/** Роль участника: предприятие продаёт, экспортёр и агент покупают */
+export type Role = "producer" | "exporter" | "agent";
+
 export interface CompanyRow extends Company {
+  role: Role;
+  /** Логин в личный кабинет */
+  email: string | null;
+  hasPassword: boolean;
   name: string;
   inn: string | null;
   inviteCode: string;
@@ -98,6 +105,10 @@ for (const sql of [
   "ALTER TABLE companies ADD COLUMN telegram TEXT",
   "ALTER TABLE companies ADD COLUMN notes TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE companies ADD COLUMN source TEXT NOT NULL DEFAULT 'admin'",
+  "ALTER TABLE companies ADD COLUMN role TEXT NOT NULL DEFAULT 'producer'",
+  "ALTER TABLE companies ADD COLUMN email TEXT",
+  "ALTER TABLE companies ADD COLUMN password_hash TEXT",
+  "ALTER TABLE bids ADD COLUMN company_id TEXT",
 ]) {
   try {
     db.exec(sql);
@@ -105,7 +116,33 @@ for (const sql of [
     // колонка уже есть
   }
 }
-db.exec("CREATE INDEX IF NOT EXISTS quotes_crop_day ON quotes(crop, day)");
+db.exec(`
+  CREATE INDEX IF NOT EXISTS quotes_crop_day ON quotes(crop, day);
+  CREATE UNIQUE INDEX IF NOT EXISTS companies_email ON companies(email) WHERE email IS NOT NULL;
+  CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    company_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS matches (
+    id TEXT PRIMARY KEY,
+    crop TEXT NOT NULL,
+    day TEXT NOT NULL,
+    bid_id TEXT NOT NULL,
+    buyer_company_id TEXT,
+    seller_company_id TEXT NOT NULL,
+    region_id TEXT NOT NULL,
+    bid_price REAL NOT NULL,
+    ask_price REAL NOT NULL,
+    bid_volume REAL NOT NULL,
+    ask_volume REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',
+    notified INTEGER NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    UNIQUE (bid_id, seller_company_id, day)
+  );
+`);
 
 type Row = Record<string, string | number | null>;
 const str = (v: string | number | null) => (v === null ? null : String(v));
@@ -118,6 +155,9 @@ const toCompany = (r: Row): CompanyRow => {
   return {
     id: String(r.id),
     code: String(r.code),
+    role: (["producer", "exporter", "agent"].includes(String(r.role)) ? String(r.role) : "producer") as Role,
+    email: str(r.email),
+    hasPassword: !!r.password_hash,
     name: String(r.name),
     inn: str(r.inn),
     regionId: String(r.region_id) as RegionId,
@@ -149,6 +189,9 @@ const toQuote = (r: Row): Quote => ({
 });
 
 export interface NewCompany {
+  role?: Role;
+  email?: string;
+  passwordHash?: string;
   name: string;
   regionId: RegionId;
   inn?: string;
@@ -177,15 +220,26 @@ export const companies = {
     const r = db.prepare("SELECT * FROM companies WHERE inn = ?").get(inn) as Row | undefined;
     return r && toCompany(r);
   },
+  byEmail(email: string): CompanyRow | undefined {
+    const r = db.prepare("SELECT * FROM companies WHERE email = ?").get(email.trim().toLowerCase()) as Row | undefined;
+    return r && toCompany(r);
+  },
+  passwordHash(id: string): string | null {
+    const r = db.prepare("SELECT password_hash FROM companies WHERE id = ?").get(id) as Row | undefined;
+    return r ? str(r.password_hash) : null;
+  },
+  setPassword(id: string, hash: string) {
+    db.prepare("UPDATE companies SET password_hash = ? WHERE id = ?").run(hash, id);
+  },
   byInvite(invite: string): CompanyRow | undefined {
     const r = db.prepare("SELECT * FROM companies WHERE invite_code = ?").get(invite.toUpperCase()) as Row | undefined;
     return r && toCompany(r);
   },
-  /** Поиск карточки по телефону из анкеты */
+  /** Поиск карточки предприятия по телефону из анкеты (для подключения к боту) */
   byPhone(phone: string): CompanyRow | undefined {
     const key = phoneKey(phone);
     if (key.length < 10) return undefined;
-    return this.list().find((c) => c.phone && phoneKey(c.phone) === key);
+    return this.list().find((c) => c.role === "producer" && c.phone && phoneKey(c.phone) === key);
   },
   create(input: NewCompany): CompanyRow {
     let code = "";
@@ -195,11 +249,12 @@ export const companies = {
     const id = randomUUID();
     const status = input.status ?? "active";
     db.prepare(
-      `INSERT INTO companies (id, code, name, inn, region_id, invite_code, active, created_at, status, crops, person, phone, telegram, notes, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO companies (id, code, name, inn, region_id, invite_code, active, created_at, status, crops, person, phone, telegram, notes, source, role, email, password_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, code, input.name, input.inn ?? null, input.regionId, invite, status === "active" ? 1 : 0, Date.now(), status,
-      JSON.stringify(input.crops ?? ["flax"]), input.person ?? null, input.phone ?? null, input.telegram ?? null, input.notes ?? "", input.source ?? "admin"
+      JSON.stringify(input.crops ?? ["flax"]), input.person ?? null, input.phone ?? null, input.telegram ?? null, input.notes ?? "", input.source ?? "admin",
+      input.role ?? "producer", input.email?.toLowerCase() ?? null, input.passwordHash ?? null
     );
     return this.get(id)!;
   },
@@ -228,10 +283,10 @@ export const companies = {
   setActive(id: string, active: boolean) {
     this.update(id, { status: active ? "active" : "blocked" });
   },
-  /** Для сайта: только участники с открытым доступом, без контактов */
+  /** Для сайта: только предприятия с открытым доступом, без контактов */
   publicList(crop?: CropId): Company[] {
     return this.list()
-      .filter((c) => c.active && (!crop || c.crops.includes(crop)))
+      .filter((c) => c.role === "producer" && c.active && (!crop || c.crops.includes(crop)))
       .map(({ id, code, regionId }) => ({ id, code, regionId }));
   },
 };
@@ -256,7 +311,7 @@ export const members = {
 };
 
 export const quotes = {
-  insert(q: Omit<Quote, "id">, source: Channel | "admin"): Quote {
+  insert(q: Omit<Quote, "id">, source: Channel | "admin" | "web"): Quote {
     const id = randomUUID();
     db.prepare(
       "INSERT INTO quotes (id, crop, company_id, region_id, price, volume, at, day, status, revision, prev_price, note, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -352,13 +407,29 @@ export interface BidAdminRow extends Bid {
 
 /** Заявки покупателей. Наружу отдаём без контактов */
 export const bids = {
-  insert(b: { crop: CropId; price: number; volume: number; regions: RegionId[]; buyer: BuyerType; name: string; contact: string; ip: string }): Bid {
+  insert(b: { crop: CropId; price: number; volume: number; regions: RegionId[]; buyer: BuyerType; name: string; contact: string; ip: string; companyId?: string }): Bid {
     const id = randomUUID();
     const at = Date.now();
     db.prepare(
-      "INSERT INTO bids (id, crop, price, volume, regions, buyer, name, contact, ip, at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')"
-    ).run(id, b.crop, b.price, b.volume, JSON.stringify(b.regions), b.buyer, b.name, b.contact, b.ip, at);
+      "INSERT INTO bids (id, crop, price, volume, regions, buyer, name, contact, ip, at, status, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)"
+    ).run(id, b.crop, b.price, b.volume, JSON.stringify(b.regions), b.buyer, b.name, b.contact, b.ip, at, b.companyId ?? null);
     return { id, crop: b.crop, price: b.price, volume: b.volume, regions: b.regions, buyer: b.buyer, at, status: "pending" };
+  },
+  get(id: string): (Bid & { companyId: string | null }) | undefined {
+    const r = db.prepare("SELECT * FROM bids WHERE id = ?").get(id) as Row | undefined;
+    return r && { ...toBid(r), companyId: str(r.company_id) };
+  },
+  /** Заявки покупателя из личного кабинета (кроме снятых) */
+  ofCompany(companyId: string): Bid[] {
+    return (db.prepare("SELECT * FROM bids WHERE company_id = ? AND status != 'removed' ORDER BY at DESC").all(companyId) as Row[]).map(toBid);
+  },
+  /** Активные заявки по культуре — с владельцем, для поиска совпадений */
+  activeWithOwner(crop: CropId): (Bid & { companyId: string | null })[] {
+    const from = Date.now() - 14 * 86_400_000;
+    return (db.prepare("SELECT * FROM bids WHERE crop = ? AND status = 'active' AND at >= ?").all(crop, from) as Row[]).map((r) => ({
+      ...toBid(r),
+      companyId: str(r.company_id),
+    }));
   },
   /** Активные заявки за последние 14 дней */
   active(crop: CropId = "flax"): Bid[] {
@@ -382,6 +453,110 @@ export const bids = {
     db.prepare("UPDATE bids SET status = 'removed' WHERE id = ?").run(id);
     const r = db.prepare("SELECT * FROM bids WHERE id = ?").get(id) as Row | undefined;
     return r && toBid(r);
+  },
+};
+
+/** Сессии личного кабинета: токен живёт 30 дней */
+export const sessions = {
+  create(companyId: string): string {
+    const token = randomBytes(32).toString("hex");
+    db.prepare("INSERT INTO sessions (token, company_id, expires_at) VALUES (?, ?, ?)").run(token, companyId, Date.now() + 30 * 86_400_000);
+    return token;
+  },
+  companyId(token: string): string | null {
+    if (!token) return null;
+    const r = db.prepare("SELECT company_id, expires_at FROM sessions WHERE token = ?").get(token) as Row | undefined;
+    if (!r) return null;
+    if (Number(r.expires_at) < Date.now()) {
+      this.remove(token);
+      return null;
+    }
+    return String(r.company_id);
+  },
+  remove(token: string) {
+    db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+  },
+  removeAll(companyId: string) {
+    db.prepare("DELETE FROM sessions WHERE company_id = ?").run(companyId);
+  },
+};
+
+export type MatchStatus = "new" | "working" | "done" | "rejected";
+
+export interface MatchRow {
+  id: string;
+  crop: CropId;
+  day: string;
+  bidId: string;
+  buyerCompanyId: string | null;
+  sellerCompanyId: string;
+  regionId: RegionId;
+  bidPrice: number;
+  askPrice: number;
+  bidVolume: number;
+  askVolume: number;
+  status: MatchStatus;
+  notified: boolean;
+  note: string;
+  createdAt: number;
+}
+
+const toMatch = (r: Row): MatchRow => ({
+  id: String(r.id),
+  crop: String(r.crop) as CropId,
+  day: String(r.day),
+  bidId: String(r.bid_id),
+  buyerCompanyId: str(r.buyer_company_id),
+  sellerCompanyId: String(r.seller_company_id),
+  regionId: String(r.region_id) as RegionId,
+  bidPrice: Number(r.bid_price),
+  askPrice: Number(r.ask_price),
+  bidVolume: Number(r.bid_volume),
+  askVolume: Number(r.ask_volume),
+  status: String(r.status) as MatchStatus,
+  notified: Number(r.notified) === 1,
+  note: String(r.note ?? ""),
+  createdAt: Number(r.created_at),
+});
+
+/** Совпадения: покупатель готов заплатить не меньше цены предприятия */
+export const matches = {
+  /** Возвращает новое совпадение или null, если такое за этот день уже есть */
+  insertIfNew(m: Omit<MatchRow, "id" | "status" | "notified" | "note" | "createdAt">): MatchRow | null {
+    const id = randomUUID();
+    const res = db
+      .prepare(
+        `INSERT OR IGNORE INTO matches (id, crop, day, bid_id, buyer_company_id, seller_company_id, region_id, bid_price, ask_price, bid_volume, ask_volume, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(id, m.crop, m.day, m.bidId, m.buyerCompanyId, m.sellerCompanyId, m.regionId, m.bidPrice, m.askPrice, m.bidVolume, m.askVolume, Date.now());
+    return Number(res.changes) > 0 ? this.get(id)! : null;
+  },
+  get(id: string): MatchRow | undefined {
+    const r = db.prepare("SELECT * FROM matches WHERE id = ?").get(id) as Row | undefined;
+    return r && toMatch(r);
+  },
+  list(limit = 300): MatchRow[] {
+    return (db.prepare("SELECT * FROM matches ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map(toMatch);
+  },
+  /** Совпадения участника, о которых менеджер уже сообщил сторонам */
+  notifiedFor(companyId: string): MatchRow[] {
+    return (
+      db
+        .prepare("SELECT * FROM matches WHERE notified = 1 AND (buyer_company_id = ? OR seller_company_id = ?) ORDER BY created_at DESC LIMIT 50")
+        .all(companyId, companyId) as Row[]
+    ).map(toMatch);
+  },
+  update(id: string, patch: { status?: MatchStatus; notified?: boolean; note?: string }) {
+    const cur = this.get(id);
+    if (!cur) return undefined;
+    db.prepare("UPDATE matches SET status = ?, notified = ?, note = ? WHERE id = ?").run(
+      patch.status ?? cur.status,
+      (patch.notified ?? cur.notified) ? 1 : 0,
+      patch.note ?? cur.note,
+      id
+    );
+    return this.get(id);
   },
 };
 

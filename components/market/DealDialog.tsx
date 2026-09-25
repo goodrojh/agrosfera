@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import { useMarket } from "@/components/market/MarketProvider";
+import { useAccount } from "@/lib/account";
 import { REGION_BY_ID, type RegionId } from "@/lib/market/regions";
 import { rub } from "@/lib/market/format";
 
@@ -31,6 +32,8 @@ export default function DealDialog({
   onClose: () => void;
 }) {
   const { submitDeal, mode } = useMarket();
+  const { account } = useAccount();
+  const live = mode === "live";
   const [role, setRole] = useState<"exporter" | "agent">("exporter");
   const [region, setRegion] = useState<RegionId>(initialRegion ?? available[0]);
   const [volume, setVolume] = useState(initialVolume ? String(initialVolume) : "");
@@ -58,7 +61,7 @@ export default function DealDialog({
       side,
       price,
       volume: Number(volume),
-      role: buy ? role : "producer",
+      role: live && account ? account.role : buy ? role : "producer",
       region: buy ? undefined : region,
       name,
       contact,
@@ -107,7 +110,9 @@ export default function DealDialog({
               <p className={"text-2xl font-bold tabular-nums " + (buy ? "text-[#c0492f]" : "text-[#2f7a1f]")}>{rub(price)} ₽/т</p>
             </div>
 
-            {buy ? (
+            {live ? (
+              account && <p className="mt-4 text-sm text-gray-600">От компании: <b className="text-gray-900">{account.name}</b></p>
+            ) : buy ? (
               <div className="mt-4 flex bg-gray-100 p-1 rounded-xl" role="group" aria-label="Кто вы">
                 {(["exporter", "agent"] as const).map((r) => (
                   <button
@@ -147,10 +152,12 @@ export default function DealDialog({
               />
             </label>
 
+            {!live && (
             <div className="grid grid-cols-2 gap-3 mt-3">
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder={buy ? "Имя или компания" : "Название предприятия"} className={field} />
               <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Телефон или @telegram" className={field} />
             </div>
+            )}
 
             {error && <p className="mt-3 text-sm text-[#c0492f]">{error}</p>}
 

@@ -1,118 +1,17 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { API_URL, asset, CONTACT_EMAIL, MAX_BOT_URL, TELEGRAM_BOT_URL } from "@/lib/config";
-import { LEAD_EVENT, type LeadRole } from "@/lib/lead";
-import { DIRECTIONS, REGIONS, type RegionId } from "@/lib/market/regions";
-import { CROPS, type CropId } from "@/lib/market/crops";
-import { isValidInn } from "@/lib/market/inn";
+import React from "react";
+import { asset, CONTACT_EMAIL, MAX_BOT_URL, TELEGRAM_BOT_URL } from "@/lib/config";
+import { CABINET_URL } from "@/lib/account";
 
-const ROLES: { id: LeadRole; label: string }[] = [
-  { id: "exporter", label: "Экспортёр" },
-  { id: "agent", label: "Агент" },
-  { id: "producer", label: "Производитель" },
+const JOIN = [
+  { role: "producer", title: "Предприятию", text: "Подавайте цены на сайте или в боте и продавайте покупателям из стакана." },
+  { role: "exporter", title: "Экспортёру", text: "Ставьте заявки на покупку и покупайте по ценам предприятий — с выкупом и доставкой через нас." },
+  { role: "agent", title: "Агенту", text: "Покупайте под своих заказчиков по договору с АгроСферой и получайте процент со сделки." },
 ];
 
-const inputCls =
-  "w-full bg-[#15291a] border border-[#2c4131] rounded-[10px] px-4 py-3.5 text-white text-[14px] placeholder-[#6f806f] outline-none focus:border-[#8CC152]/60 transition-colors";
-
-/** Подвал. withForm — форма заявки (на странице «Сотрудничество»); на главной только ссылки */
+/** Подвал. withForm — блок регистрации (на странице «Сотрудничество»); на главной только ссылки */
 export default function Footer({ className, withForm = true }: { className?: string; withForm?: boolean }) {
-  const [role, setRole] = useState<LeadRole>("exporter");
-  const [form, setForm] = useState({ name: "", contact: "", target: "china", volume: "", comment: "" });
-  // Анкета производителя: после проверки менеджером открывается доступ к боту
-  const [prod, setProd] = useState<{ name: string; inn: string; regionId: RegionId; crops: CropId[]; person: string; phone: string; comment: string }>({
-    name: "",
-    inn: "",
-    regionId: "omsk",
-    crops: ["flax"],
-    person: "",
-    phone: "",
-    comment: "",
-  });
-  const [state, setState] = useState<"idle" | "sending" | "done" | "error">("idle");
-  // ИНН, который пользователь подтвердил, несмотря на несовпадение контрольной суммы
-  const [innConfirmed, setInnConfirmed] = useState("");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    const onLead = (e: Event) => {
-      const r = (e as CustomEvent<LeadRole>).detail;
-      setRole(r);
-      setForm((f) => ({ ...f, target: r === "producer" ? "omsk" : "china" }));
-      setState("idle");
-    };
-    window.addEventListener(LEAD_EVENT, onLead);
-    // Пришли с главной по кнопке заявки: ?role=exporter
-    const r = new URLSearchParams(window.location.search).get("role");
-    if (r === "exporter" || r === "agent" || r === "producer") onLead(new CustomEvent(LEAD_EVENT, { detail: r }));
-    return () => window.removeEventListener(LEAD_EVENT, onLead);
-  }, []);
-
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const submitProducer = async () => {
-    if (prod.name.trim().length < 3) return setError("Укажите название предприятия.");
-    // ИНН необязателен: если указан — проверяем, если нет — менеджер уточнит при звонке
-    const len = prod.inn.length;
-    if (len === 13 || len === 15) return setError("Похоже, это ОГРН. Нужен ИНН: 10 цифр для организации или 12 — для ИП и КФХ. Можно оставить поле пустым.");
-    if (len > 0 && len !== 10 && len !== 12) return setError(`ИНН — 10 цифр для организации или 12 для ИП и КФХ (сейчас цифр: ${len}). Если ИНН нет — оставьте поле пустым.`);
-    // Контрольная сумма не сошлась: предупреждаем, но не блокируем — анкету всё равно проверяет менеджер
-    if (len > 0 && !isValidInn(prod.inn) && innConfirmed !== prod.inn) {
-      setInnConfirmed(prod.inn);
-      return setError("ИНН не прошёл проверку контрольной суммы — проверьте цифры. Если всё верно, нажмите «Отправить анкету» ещё раз: менеджер проверит вручную.");
-    }
-    if (prod.person.trim().length < 3) return setError("Укажите контактное лицо.");
-    if (prod.phone.replace(/\D/g, "").length < 10) return setError("Укажите телефон — по нему бот узнает вас после подтверждения.");
-    setError("");
-    setState("sending");
-    if (!API_URL) {
-      await new Promise((r) => setTimeout(r, 600));
-      setState("done");
-      return;
-    }
-    try {
-      const res = await fetch(`${API_URL}/api/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(prod) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? "Не удалось отправить");
-      setState("done");
-    } catch (err) {
-      setState("error");
-      setError((err as Error).message);
-    }
-  };
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (role === "producer") return submitProducer();
-    if (form.name.trim().length < 2 || form.contact.trim().length < 5) {
-      setError("Укажите имя или компанию и телефон / Telegram.");
-      return;
-    }
-    setError("");
-    setState("sending");
-    const payload = { role, ...form, volume: form.volume ? Number(form.volume) : null };
-    if (!API_URL) {
-      await new Promise((r) => setTimeout(r, 600));
-      setState("done");
-      return;
-    }
-    try {
-      const res = await fetch(`${API_URL}/api/leads`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      setState("done");
-    } catch {
-      setState("error");
-      setError("Не удалось отправить. Попробуйте ещё раз или напишите нам в бот.");
-    }
-  };
-
   const coop = (hash: string) => asset(`/sotrudnichestvo/${hash}`);
   const botHref = TELEGRAM_BOT_URL || coop("#bot");
   const maxHref = MAX_BOT_URL || coop("#bot");
@@ -121,155 +20,42 @@ export default function Footer({ className, withForm = true }: { className?: str
     { title: "Инструмент", links: [["Котировки", asset("/#terminal")], ["Попробовать бота", coop("#bot")]] },
     { title: "Сотрудничество", links: [["Производителям", coop("#partneram")], ["Экспортёрам", coop("#partneram")], ["Агентам", coop("#partneram")], ["Инструкция", coop("#instrukciya")]] },
     { title: "Бот", links: [["Telegram", botHref], ["MAX", maxHref]] },
-    { title: "Контакты", links: [...(CONTACT_EMAIL ? [[CONTACT_EMAIL, `mailto:${CONTACT_EMAIL}`]] : []), ["Оставить заявку", coop("#zayavka")], ["Вопросы и ответы", coop("#faq")]] },
+    { title: "Контакты", links: [...(CONTACT_EMAIL ? [[CONTACT_EMAIL, `mailto:${CONTACT_EMAIL}`]] : []), ["Личный кабинет", CABINET_URL], ["Вопросы и ответы", coop("#faq")]] },
   ];
 
   return (
     <footer className={"w-full " + (withForm ? "pt-20 bg-[#f6f8f2] " : "") + (className || "")}>
       <div className="w-full bg-[#07160a] overflow-hidden">
-        {/* Заявка */}
+        {/* Регистрация */}
         {withForm && (
-        <div id="zayavka" className="px-4 md:px-20 py-14 md:py-16 grid lg:grid-cols-[1fr_1.4fr] gap-10 border-b border-[#1d3322] scroll-mt-6">
-          <div>
-            <h2 className="text-white font-bold text-[28px] md:text-[34px] leading-[1.2] max-w-[360px] mb-4">Оставить заявку</h2>
-            <p className="text-[#9aab98] text-[15px] leading-relaxed max-w-[380px]">
-              Экспортёру — подберём объём и рассчитаем цену с доставкой. Агенту — пришлём договор. Производителю — проверим анкету, созвонимся и откроем доступ к боту котировок.
-            </p>
-          </div>
-
-          <AnimatePresence mode="wait">
-            {state === "done" ? (
-              <motion.div
-                key="done"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="rounded-2xl border border-[#8CC152]/30 bg-[#8CC152]/10 p-6 md:p-8 text-white"
-              >
-                <p className="text-xl font-semibold mb-2">✓ {role === "producer" ? "Анкета отправлена" : "Заявка принята"}</p>
-                <p className="text-[#b9c8b6] text-sm leading-relaxed">
-                  {!API_URL
-                    ? "Сейчас сайт работает в демо-режиме: заявка не отправлена. После подключения сервера заявки будут попадать в панель управления."
-                    : role === "producer"
-                      ? "Менеджер проверит предприятие, позвонит, уточнит культуры и откроет доступ. После этого откройте бота в Telegram и нажмите «Отправить номер» — бот узнает вас по телефону из анкеты."
-                      : "Менеджер свяжется с вами в рабочее время."}
+          <div id="zayavka" className="px-4 md:px-20 py-14 md:py-16 border-b border-[#1d3322] scroll-mt-6">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+              <div>
+                <h2 className="text-white font-bold text-[28px] md:text-[34px] leading-[1.2] mb-3">Начать работу</h2>
+                <p className="text-[#9aab98] text-[15px] leading-relaxed max-w-[520px]">
+                  Зарегистрируйтесь в личном кабинете — менеджер позвонит, проверит компанию и откроет доступ к инструменту.
                 </p>
-                {role === "producer" && TELEGRAM_BOT_URL && (
-                  <a href={TELEGRAM_BOT_URL} className="mt-4 mr-5 inline-block rounded-lg bg-[#8CC152] text-[#0d2410] px-4 py-2 text-sm font-semibold">
-                    Открыть бота
-                  </a>
-                )}
-                <button onClick={() => setState("idle")} className="mt-5 text-sm text-[#C3E79A] hover:text-white transition-colors">
-                  Отправить ещё одну →
-                </button>
-              </motion.div>
-            ) : (
-              <motion.form key="form" onSubmit={submit} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
-                <div className="flex gap-2 bg-[#15291a] p-1 rounded-xl border border-[#2c4131] w-full sm:w-fit">
-                  {ROLES.map((r) => (
-                    <button
-                      type="button"
-                      key={r.id}
-                      onClick={() => {
-                        setRole(r.id);
-                        setForm((f) => ({ ...f, target: r.id === "producer" ? "omsk" : "china" }));
-                      }}
-                      className={
-                        "flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-all " +
-                        (role === r.id ? "bg-[#8CC152] text-[#0d2410]" : "text-[#9aab98] hover:text-white")
-                      }
-                    >
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
-                {role === "producer" ? (
-                  <>
-                    <div className="grid sm:grid-cols-2 gap-3">
-                      <input className={inputCls} placeholder="Название предприятия" value={prod.name} onChange={(e) => setProd((p) => ({ ...p, name: e.target.value }))} />
-                      <input
-                        className={inputCls}
-                        placeholder="ИНН (если есть)"
-                        inputMode="numeric"
-                        value={prod.inn}
-                        onChange={(e) => setProd((p) => ({ ...p, inn: e.target.value.replace(/\D/g, "").slice(0, 15) }))}
-                      />
-                      <select className={inputCls} value={prod.regionId} onChange={(e) => setProd((p) => ({ ...p, regionId: e.target.value as RegionId }))}>
-                        {REGIONS.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            Склад: {r.name}
-                          </option>
-                        ))}
-                      </select>
-                      <input className={inputCls} placeholder="Контактное лицо, должность" value={prod.person} onChange={(e) => setProd((p) => ({ ...p, person: e.target.value }))} />
-                      <input className={inputCls + " sm:col-span-2"} placeholder="Телефон (по нему бот узнает вас)" inputMode="tel" value={prod.phone} onChange={(e) => setProd((p) => ({ ...p, phone: e.target.value }))} />
-                    </div>
-                    <div>
-                      <p className="text-[13px] text-[#9aab98] mb-2">Какие культуры продаёте</p>
-                      <div className="flex flex-wrap gap-2">
-                        {CROPS.map((c) => {
-                          const on = prod.crops.includes(c.id);
-                          return (
-                            <button
-                              type="button"
-                              key={c.id}
-                              onClick={() => setProd((p) => ({ ...p, crops: on ? p.crops.filter((x) => x !== c.id) : [...p.crops, c.id] }))}
-                              className={
-                                "rounded-full px-3 py-1.5 text-sm border transition-colors " +
-                                (on ? "bg-[#8CC152] border-[#8CC152] text-[#0d2410] font-medium" : "border-[#2c4131] text-[#9aab98] hover:text-white")
-                              }
-                            >
-                              {c.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <textarea
-                      className={inputCls + " resize-none"}
-                      rows={2}
-                      placeholder="Объёмы, условия, удобное время для звонка (необязательно)"
-                      value={prod.comment}
-                      onChange={(e) => setProd((p) => ({ ...p, comment: e.target.value }))}
-                    />
-                  </>
-                ) : (
-                <>
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <input className={inputCls} placeholder="Имя или компания" value={form.name} onChange={set("name")} />
-                  <input className={inputCls} placeholder="Телефон или @telegram" value={form.contact} onChange={set("contact")} />
-                  <select className={inputCls} value={form.target} onChange={set("target")}>
-                    {DIRECTIONS.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        Направление: {d.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    className={inputCls}
-                    placeholder="Нужный объём, т"
-                    inputMode="numeric"
-                    value={form.volume}
-                    onChange={(e) => setForm((f) => ({ ...f, volume: e.target.value.replace(/\D/g, "") }))}
-                  />
-                </div>
-                <textarea className={inputCls + " resize-none"} rows={2} placeholder="Комментарий (необязательно)" value={form.comment} onChange={set("comment")} />
-                </>
-                )}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-1">
-                  <button
-                    type="submit"
-                    disabled={state === "sending"}
-                    className="w-full sm:w-auto px-7 py-3.5 rounded-[10px] text-[#0d2410] text-[14px] font-bold transition-all cursor-pointer whitespace-nowrap bg-[#8CC152] hover:bg-[#9fd065] disabled:opacity-60"
-                  >
-                    {state === "sending" ? "Отправляем…" : role === "producer" ? "Отправить анкету" : "Отправить заявку"}
-                  </button>
-                  <p className="text-[11px] text-[#6f806f] leading-snug">Нажимая кнопку, вы соглашаетесь на обработку персональных данных.</p>
-                </div>
-                {error && <p className="text-sm text-[#F5A897]">{error}</p>}
-              </motion.form>
-            )}
-          </AnimatePresence>
-        </div>
+              </div>
+              <a href={CABINET_URL} className="text-[#C3E79A] text-sm hover:text-white transition-colors whitespace-nowrap">
+                Уже есть аккаунт? Войти →
+              </a>
+            </div>
+            <div className="grid md:grid-cols-3 gap-3">
+              {JOIN.map((j) => (
+                <a
+                  key={j.role}
+                  href={`${CABINET_URL}?role=${j.role}`}
+                  className="group rounded-2xl border border-[#2c4131] bg-[#0f2213] p-6 hover:border-[#8CC152]/60 transition-colors"
+                >
+                  <p className="text-white font-semibold text-lg">{j.title}</p>
+                  <p className="mt-2 text-[#9aab98] text-sm leading-relaxed">{j.text}</p>
+                  <span className="mt-5 inline-block rounded-lg bg-[#8CC152] text-[#0d2410] px-4 py-2 text-sm font-bold group-hover:bg-[#9fd065] transition-colors">
+                    Зарегистрироваться
+                  </span>
+                </a>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Ссылки */}

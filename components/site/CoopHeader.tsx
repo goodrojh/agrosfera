@@ -27,8 +27,8 @@ export default function CoopHeader() {
             </a>
           ))}
         </nav>
-        <a href="#zayavka" className="rounded-full bg-white text-[#0d2410] px-4 md:px-5 py-2 text-sm md:text-[15px] font-semibold hover:bg-white/90">
-          Оставить заявку
+        <a href={asset("/kabinet/")} className="rounded-full bg-white text-[#0d2410] px-4 md:px-5 py-2 text-sm md:text-[15px] font-semibold hover:bg-white/90">
+          Личный кабинет
         </a>
       </div>
       <div className="max-w-6xl mx-auto pt-10 pb-16 md:pt-14 md:pb-20">

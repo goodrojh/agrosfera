@@ -11,6 +11,7 @@ import { checkQuote, parseSubmission } from "../../lib/market/validate.ts";
 import { REGION_BY_ID } from "../../lib/market/regions.ts";
 import { CROPS, CROP_BY_ID, type CropId } from "../../lib/market/crops.ts";
 import type { Bid, Company, Quote } from "../../lib/market/types.ts";
+import { onQuote } from "./matching.ts";
 
 /** События для SSE-потока сайта */
 export const bus = new EventEmitter();
@@ -273,6 +274,7 @@ function answer(msg: Incoming, company: CompanyRow, round: Round, text: string):
       msg.channel
     );
     publishQuote(q);
+    onQuote(q);
     if (reply.accept.moderation) notifyAdmin(`🔎 Цена на проверку: ${company.name} · ${cropName} · ${rub(q.price)} ₽/т · ${rub(q.volume)} т`);
     const line = `${cropName}: ${rub(q.price)} ₽/т · ${rub(q.volume)} т`;
     round.accepted.push(`• ${line}${reply.accept.moderation ? " (на проверке)" : ""}`);
@@ -303,5 +305,6 @@ export function moderate(quoteId: string, approve: boolean): Quote | undefined {
   quotes.setStatus(quoteId, approve ? "accepted" : "rejected", approve ? undefined : "Отклонено модератором");
   const updated = quotes.get(quoteId)!;
   publishQuote(updated);
+  onQuote(updated);
   return updated;
 }
