@@ -2,9 +2,12 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Minus, Search, X } from "lucide-react";
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Minus, X } from "lucide-react";
 import { useMarket } from "@/components/market/MarketProvider";
 import PriceChart from "@/components/market/PriceChart";
+import RussiaMap from "@/components/market/RussiaMap";
+import RegionPicker from "@/components/market/RegionPicker";
+import OrderBook from "@/components/market/OrderBook";
 import {
   computeIndex,
   dailySeries,
@@ -12,6 +15,7 @@ import {
   intradaySeries,
   lastHistoryDay,
   regionRows,
+  type IndexStats,
   type Scope,
 } from "@/lib/market/aggregate";
 import { DIRECTIONS, DIRECTION_BY_ID, REGIONS, REGION_BY_ID, type DirectionId, type RegionId } from "@/lib/market/regions";
@@ -59,7 +63,6 @@ export default function Terminal() {
   const [direction, setDirection] = useState<DirectionId | "all">("all");
   const [region, setRegion] = useState<RegionId | null>(null);
   const [period, setPeriod] = useState<PeriodId>("day");
-  const [query, setQuery] = useState("");
 
   const scope: Scope = { direction, region };
   // «Сейчас» для рынка — время последнего события: расчёт остаётся чистой функцией данных
@@ -98,8 +101,17 @@ export default function Terminal() {
     const todayScoped = today.filter((q) => inScope(q.regionId, scope));
     const feed = [...todayScoped].sort((a, b) => b.at - a.at).slice(0, 12);
 
+    // Цена по каждому региону — для карты и списка выбора
+    const regionStats = new Map<RegionId, IndexStats>();
+    for (const r of REGIONS) {
+      const st = computeIndex(all.filter((q) => q.regionId === r.id));
+      if (st) regionStats.set(r.id, st);
+    }
+
     return {
       stats,
+      inS,
+      regionStats,
       change: stats && prevStats ? stats.index / prevStats.index - 1 : null,
       series,
       rows,
@@ -119,15 +131,20 @@ export default function Terminal() {
     : direction === "all"
       ? "все регионы"
       : `направление «${DIRECTION_BY_ID[direction].name}»`;
-  const filteredRows = data?.rows.filter((r) => REGION_BY_ID[r.regionId].name.toLowerCase().includes(query.trim().toLowerCase())) ?? [];
+  const filteredRows = data?.rows ?? [];
   const botHref = TELEGRAM_BOT_URL || "#bot";
 
   const pickDirection = (d: DirectionId | "all") => {
     setDirection(d);
     setRegion(null);
   };
+  /** Выбор региона: из списка, на карте или в таблице. Если регион вне направления — переключаем на «Все регионы» */
+  const selectRegion = (r: RegionId | null) => {
+    if (r && direction !== "all" && !REGION_BY_ID[r].directions.includes(direction)) setDirection("all");
+    setRegion(r);
+  };
   const pickRegion = (r: RegionId) => {
-    setRegion(region === r ? null : r);
+    selectRegion(region === r ? null : r);
     document.getElementById("terminal-summary")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
@@ -175,19 +192,28 @@ export default function Terminal() {
           })}
         </div>
 
-        {/* Что сейчас показано */}
-        <div id="terminal-summary" className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-6 mb-4 text-sm scroll-mt-6">
-          <span className="text-gray-500">Показано:</span>
-          <span className="font-semibold text-gray-900">{scopeName}</span>
-          {direction !== "all" && !region && <span className="text-gray-400">· {DIRECTION_BY_ID[direction].note}</span>}
-          {region && (
-            <button
-              onClick={() => setRegion(null)}
-              className="inline-flex items-center gap-1 rounded-full bg-gray-100 hover:bg-gray-200 px-2.5 py-0.5 text-xs text-gray-700 transition-colors"
-            >
-              сбросить регион <X size={12} />
-            </button>
-          )}
+        {/* 2. Регион */}
+        <div id="terminal-summary" className="mt-6 mb-5 scroll-mt-6">
+          <p className="text-sm font-semibold text-gray-900 mb-3">
+            Регион <span className="font-normal text-gray-400">— необязательно</span>
+          </p>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <RegionPicker value={region} onChange={selectRegion} stats={data?.regionStats ?? new Map()} />
+            <span className="text-sm text-gray-500">
+              или нажмите на регион на{" "}
+              <button
+                onClick={() => document.getElementById("terminal-map")?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                className="text-[#1F5A25] font-medium underline underline-offset-2 decoration-[#1F5A25]/30 hover:decoration-[#1F5A25]"
+              >
+                карте
+              </button>
+            </span>
+          </div>
+          <p className="text-sm mt-4">
+            <span className="text-gray-500">Показано: </span>
+            <span className="font-semibold text-gray-900">{scopeName}</span>
+            {direction !== "all" && !region && <span className="text-gray-400"> · {DIRECTION_BY_ID[direction].note}</span>}
+          </p>
         </div>
 
         {/* 2. Три главные цифры */}
@@ -244,7 +270,33 @@ export default function Terminal() {
           </div>
         </div>
 
-        {/* 3. График + последние цены */}
+        {/* 3. Карта + стакан */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mt-4">
+          <div id="terminal-map" className={card + " lg:col-span-3 p-5 md:p-6 flex flex-col"}>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div>
+                <h3 className="font-semibold text-gray-900">Карта цен</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Чем темнее, тем дешевле. Нажмите на регион, чтобы выбрать его.</p>
+              </div>
+              {region && (
+                <button
+                  onClick={() => selectRegion(null)}
+                  className="inline-flex items-center gap-1 rounded-full bg-gray-100 hover:bg-gray-200 px-3 py-1 text-xs text-gray-700 transition-colors"
+                >
+                  {REGION_BY_ID[region].name} <X size={12} />
+                </button>
+              )}
+            </div>
+            <div className="flex-1 flex items-center">
+              {data && <RussiaMap stats={data.regionStats} direction={direction} selected={region} onSelect={(id) => selectRegion(region === id ? null : id)} />}
+            </div>
+          </div>
+          <div className={card + " lg:col-span-2 p-5 md:p-6"}>
+            <OrderBook quotes={data?.inS ?? []} />
+          </div>
+        </div>
+
+        {/* 4. График + последние цены */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
           <div className={card + " lg:col-span-2 p-5 md:p-6 flex flex-col"}>
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -316,21 +368,12 @@ export default function Terminal() {
           </div>
         </div>
 
-        {/* 4. Регионы */}
+        {/* 5. Регионы */}
         <div className={card + " mt-4 p-5 md:p-6"}>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
             <div>
               <h3 className="font-semibold text-gray-900">Цены по регионам</h3>
               <p className="text-xs text-gray-500 mt-0.5">От дешёвых к дорогим. Нажмите на регион, чтобы посмотреть его график.</p>
-            </div>
-            <div className="relative sm:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Найти регион"
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1F5A25]/15 focus:border-[#1F5A25]/40"
-              />
             </div>
           </div>
 
@@ -359,7 +402,7 @@ export default function Terminal() {
                       <span className="flex flex-wrap items-center gap-x-2 text-xs text-gray-400 mt-0.5">
                         <span>{st.count} предпр.</span>
                         <Change value={r.change} />
-                        {i === 0 && !query && <span className="text-[#2f7a1f] font-medium">дешевле всего</span>}
+                        {i === 0 && <span className="text-[#2f7a1f] font-medium">дешевле всего</span>}
                       </span>
                     </span>
                     <span className="text-right shrink-0">
@@ -374,7 +417,7 @@ export default function Terminal() {
                       <span className="block text-sm font-medium text-gray-900 truncate">{REGION_BY_ID[r.regionId].name}</span>
                       <span className="block text-xs text-gray-400">
                         {REGION_BY_ID[r.regionId].macro} · {st.count} предпр.
-                        {i === 0 && !query && <span className="ml-1.5 text-[#2f7a1f] font-medium">дешевле всего</span>}
+                        {i === 0 && <span className="ml-1.5 text-[#2f7a1f] font-medium">дешевле всего</span>}
                       </span>
                     </span>
                     <span className="flex items-center gap-3">
@@ -392,11 +435,10 @@ export default function Terminal() {
                 </button>
               );
             })}
-            {filteredRows.length === 0 && <p className="text-sm text-gray-400 px-3 py-6">Ничего не найдено</p>}
           </div>
         </div>
 
-        {/* 5. Действие */}
+        {/* 6. Действие */}
         <div className="mt-4 rounded-2xl bg-[#1F5A25] text-white p-6 md:p-8 flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div>
             <p className="text-xl md:text-2xl font-semibold">Нужен объём по этой цене?</p>

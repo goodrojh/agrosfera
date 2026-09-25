@@ -101,3 +101,28 @@ export const DIRECTION_BY_ID: Record<DirectionId, Direction> = Object.fromEntrie
 export function isRegionId(v: string): v is RegionId {
   return v in REGION_BY_ID;
 }
+
+/** Названия регионов в данных карты (lib/market/russia-map.json) */
+export const MAP_NAME: Record<RegionId, string> = {
+  altai: "Алтайский край",
+  novosibirsk: "Новосибирская область",
+  omsk: "Омская область",
+  krasnoyarsk: "Красноярский край",
+  amur: "Амурская область",
+  zabaikal: "Забайкальский край",
+  kurgan: "Курганская область",
+  chelyabinsk: "Челябинская область",
+  bashkortostan: "Башкортостан",
+  orenburg: "Оренбургская область",
+  saratov: "Саратовская область",
+  samara: "Самарская область",
+  volgograd: "Волгоградская область",
+  rostov: "Ростовская область",
+  krasnodar: "Краснодарский край",
+  stavropol: "Ставропольский край",
+};
+
+/** Короткое имя для плотных списков: «Омская», «Алтайский», «Башкортостан» */
+export function shortRegionName(id: RegionId): string {
+  return REGION_BY_ID[id].name.replace(/^Респ\.\s*/, "").replace(/\s+(обл\.|край)$/, "");
+}
