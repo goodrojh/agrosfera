@@ -250,3 +250,17 @@ export function checkQuote(price: number, volume: number, ctx: CheckContext = {}
 
   return { level, issues, suggestion, moderation, reference: ctx.reference, deviation };
 }
+
+/** Проверка заявки покупателя с сайта: те же пороги, но ответ — одна понятная ошибка */
+export function checkBid(price: number, volume: number, reference?: number): string | null {
+  if (!Number.isFinite(price) || price <= 0) return "Укажите цену за тонну.";
+  if (price < 1000 && price * 1000 >= LIMITS.priceMin) return `Похоже, цена в тысячах. Имели в виду ${rub(price * 1000)} ₽/т?`;
+  if (price < LIMITS.priceMin || price > LIMITS.priceMax) return `Цена должна быть от ${rub(LIMITS.priceMin)} до ${rub(LIMITS.priceMax)} ₽/т.`;
+  if (!Number.isFinite(volume) || volume < LIMITS.volumeMin || volume > LIMITS.volumeMax) {
+    return `Объём должен быть от ${LIMITS.volumeMin} до ${rub(LIMITS.volumeMax)} т.`;
+  }
+  if (reference && Math.abs(price / reference - 1) > LIMITS.hard) {
+    return `Цена сильно отличается от рынка (средняя ${rub(reference)} ₽/т). Проверьте цифру.`;
+  }
+  return null;
+}

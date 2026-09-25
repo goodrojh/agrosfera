@@ -83,7 +83,7 @@ const steps: StepData[] = [
       "Объём — сумма свободных к отгрузке тонн по выбранному региону или направлению.",
     ],
     image: "/media/port.jpg",
-    cta: { label: "Открыть котировки", href: "#terminal" },
+    cta: { label: "Открыть котировки", href: "/#terminal" },
   },
 ];
 
@@ -301,7 +301,7 @@ export default function HowItWorks({ className }: { className?: string }) {
                   <button
                     onClick={() => {
                       if (step.cta.role) openLead(step.cta.role);
-                      else if (step.cta.href) document.querySelector(step.cta.href)?.scrollIntoView({ behavior: "smooth" });
+                      else if (step.cta.href) window.location.href = asset(step.cta.href);
                     }}
                     className="relative overflow-hidden bg-[#111] text-white rounded-2xl px-8 md:px-10 py-4 md:py-5 text-[16px] font-bold flex items-center gap-3 hover:bg-[#1F5A25] transition-all duration-500 group"
                   >

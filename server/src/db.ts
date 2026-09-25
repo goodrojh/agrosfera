@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { config, mskDay } from "./config.ts";
-import type { Company, DailyClose, Quote, QuoteStatus } from "../../lib/market/types.ts";
+import type { Bid, Company, DailyClose, Quote, QuoteStatus } from "../../lib/market/types.ts";
 import type { RegionId } from "../../lib/market/regions.ts";
 
 export type Channel = "telegram" | "max";
@@ -57,6 +57,18 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     role TEXT, name TEXT, contact TEXT, target TEXT, volume REAL, comment TEXT,
     created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS bids (
+    id TEXT PRIMARY KEY,
+    crop TEXT NOT NULL DEFAULT 'flax',
+    price REAL NOT NULL,
+    volume REAL NOT NULL,
+    regions TEXT NOT NULL DEFAULT '[]',
+    name TEXT,
+    contact TEXT,
+    ip TEXT,
+    at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active'
   );
   CREATE TABLE IF NOT EXISTS reminders (day TEXT NOT NULL, company_id TEXT NOT NULL, PRIMARY KEY (day, company_id));
 `);
@@ -191,6 +203,37 @@ export const leads = {
     db.prepare("INSERT INTO leads (role, name, contact, target, volume, comment, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
       l.role, l.name, l.contact, l.target, l.volume, l.comment, Date.now()
     );
+  },
+};
+
+const toBid = (r: Row): Bid => ({
+  id: String(r.id),
+  price: Number(r.price),
+  volume: Number(r.volume),
+  regions: JSON.parse(String(r.regions)),
+  at: Number(r.at),
+  status: String(r.status) as Bid["status"],
+});
+
+/** Заявки покупателей. Наружу отдаём без контактов */
+export const bids = {
+  insert(b: { crop: string; price: number; volume: number; regions: RegionId[]; name: string; contact: string; ip: string }): Bid {
+    const id = randomUUID();
+    const at = Date.now();
+    db.prepare("INSERT INTO bids (id, crop, price, volume, regions, name, contact, ip, at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')").run(
+      id, b.crop, b.price, b.volume, JSON.stringify(b.regions), b.name, b.contact, b.ip, at
+    );
+    return { id, price: b.price, volume: b.volume, regions: b.regions, at, status: "active" };
+  },
+  /** Активные заявки за последние 14 дней */
+  active(crop = "flax"): Bid[] {
+    const from = Date.now() - 14 * 86_400_000;
+    return (db.prepare("SELECT * FROM bids WHERE crop = ? AND status = 'active' AND at >= ? ORDER BY price DESC").all(crop, from) as Row[]).map(toBid);
+  },
+  remove(id: string): Bid | undefined {
+    db.prepare("UPDATE bids SET status = 'removed' WHERE id = ?").run(id);
+    const r = db.prepare("SELECT * FROM bids WHERE id = ?").get(id) as Row | undefined;
+    return r && toBid(r);
   },
 };
 

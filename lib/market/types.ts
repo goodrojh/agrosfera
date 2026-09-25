@@ -39,11 +39,28 @@ export interface DailyClose {
   volume: number;
 }
 
+/** Заявка покупателя в стакане. Контакты наружу не отдаются. */
+export interface Bid {
+  id: string;
+  /** ₽/т с НДС, EXW */
+  price: number;
+  /** Сколько тонн хотят купить */
+  volume: number;
+  /** Из каких регионов готовы брать; пусто — из любых */
+  regions: RegionId[];
+  at: number;
+  status: "active" | "removed";
+  /** Заявка, оставленная в этом браузере */
+  own?: boolean;
+}
+
 export interface MarketSnapshot {
   companies: Company[];
   /** Все подачи за сегодня, включая отклонённые */
   today: Quote[];
   /** Дневные закрытия за прошлые дни */
   history: DailyClose[];
+  /** Активные заявки покупателей */
+  bids: Bid[];
   serverTime: number;
 }

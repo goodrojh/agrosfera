@@ -1,18 +1,20 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Map as MapIcon, Minus, X } from "lucide-react";
+import Link from "next/link";
+import { ArrowDownRight, ArrowUpRight, Map as MapIcon, Minus, Plus, X } from "lucide-react";
 import { useMarket } from "@/components/market/MarketProvider";
 import PriceChart from "@/components/market/PriceChart";
 import RussiaMap from "@/components/market/RussiaMap";
 import RegionPicker from "@/components/market/RegionPicker";
 import OrderBook from "@/components/market/OrderBook";
+import BidDialog from "@/components/market/BidDialog";
 import { computeIndex, dailySeries, inScope, intradaySeries, lastHistoryDay, type IndexStats, type Scope } from "@/lib/market/aggregate";
 import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
 import { REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
-import { ago, pct, rub, tons } from "@/lib/market/format";
+import { ago, pct, rub } from "@/lib/market/format";
 import type { DailyClose, Quote } from "@/lib/market/types";
-import { openLead } from "@/lib/lead";
+import { TELEGRAM_BOT_URL } from "@/lib/config";
 
 const PERIODS = [
   { id: "day", label: "День", days: 1 },
@@ -27,7 +29,7 @@ function Change({ value }: { value: number | null }) {
   const down = value < -0.0005;
   const Icon = up ? ArrowUpRight : down ? ArrowDownRight : Minus;
   return (
-    <span className={"inline-flex items-center gap-0.5 font-semibold tabular-nums " + (up ? "text-[#2f7a1f]" : down ? "text-[#c0492f]" : "text-gray-500")}>
+    <span className={"inline-flex items-center gap-0.5 text-sm font-semibold tabular-nums " + (up ? "text-[#2f7a1f]" : down ? "text-[#c0492f]" : "text-gray-500")}>
       <Icon size={14} />
       {pct(value)}
     </span>
@@ -65,12 +67,9 @@ function ChartPanel({
   }, [period, today, history, latest, scope, nowTs, minCount]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div>
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="font-semibold text-gray-900">График</p>
-          <p className="text-xs text-gray-400">средняя цена, ₽/т</p>
-        </div>
+        <p className="text-xs text-gray-400">Средняя цена продавцов, ₽/т</p>
         <div className="flex bg-gray-100 p-0.5 rounded-lg">
           {PERIODS.map((p) => (
             <button
@@ -86,7 +85,7 @@ function ChartPanel({
           ))}
         </div>
       </div>
-      <div className="flex-1 min-h-[300px] mt-4">
+      <div className="h-[190px] md:h-[210px] mt-2">
         <PriceChart points={series} kind={period === "day" ? "intraday" : "daily"} animKey={`${period}-${(scope.regions ?? []).join(",")}`} />
       </div>
     </div>
@@ -120,13 +119,7 @@ function MapDialog({
   }, [onClose]);
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Выбор регионов на карте"
-    >
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40" onClick={onClose} role="dialog" aria-modal="true" aria-label="Выбор регионов на карте">
       <div className="w-full max-w-5xl max-h-full overflow-y-auto rounded-2xl bg-white p-5 md:p-7 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
@@ -163,10 +156,7 @@ function MapDialog({
             <button onClick={onClose} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
               Отмена
             </button>
-            <button
-              onClick={() => onApply(draft)}
-              className="rounded-xl bg-[#1F5A25] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[#174a1c]"
-            >
+            <button onClick={() => onApply(draft)} className="rounded-xl bg-[#1F5A25] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[#174a1c]">
               Применить{draft.length ? ` (${draft.length})` : ""}
             </button>
           </div>
@@ -177,10 +167,12 @@ function MapDialog({
 }
 
 export default function Terminal() {
-  const { ready, mode, crop, setCrop, supported, companies, today, history, latest, lastEventAt } = useMarket();
+  const { ready, mode, crop, setCrop, supported, companies, today, history, latest, lastEventAt, bids } = useMarket();
   const [regions, setRegions] = useState<RegionId[]>([]);
   const [mapOpen, setMapOpen] = useState(false);
+  const [bidDraft, setBidDraft] = useState<{ price?: number; volume?: number } | null>(null);
   const closeMap = useCallback(() => setMapOpen(false), []);
+  const closeBid = useCallback(() => setBidDraft(null), []);
 
   const scope = useMemo<Scope>(() => ({ direction: "all", region: null, regions }), [regions]);
   const cropInfo = CROP_BY_ID[crop];
@@ -205,23 +197,26 @@ export default function Terminal() {
     return { inS, stats, change: stats && prevStats ? stats.index / prevStats.index - 1 : null, regionStats, total };
   }, [ready, latest, prevCloses, companies, scope]);
 
+  // Заявки покупателей: без регионов — подходят любому выбору
+  const scopedBids = useMemo(
+    () => bids.filter((b) => !regions.length || !b.regions.length || b.regions.some((r) => regions.includes(r))),
+    [bids, regions]
+  );
+
   const chooseCrop = (c: CropId) => {
     setCrop(c);
-    // Регионы, где новой культуры нет, из выбора убираем
     setRegions((prev) => prev.filter((r) => CROP_BY_ID[c].regions.includes(r)));
   };
 
   const s = live?.stats;
   const minCount = regions.length ? 1 : Math.max(3, Math.round((live?.total ?? 0) * 0.35));
+  const producerHref = TELEGRAM_BOT_URL || "/sotrudnichestvo/#bot";
 
   return (
-    <section id="terminal" className="bg-white py-16 md:py-24 px-4 md:px-8 scroll-mt-4">
+    <section id="terminal" className="bg-white py-6 md:py-8 px-4 md:px-8 scroll-mt-0">
       <div className="max-w-7xl mx-auto">
-        <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
-          <div>
-            <h2 className="text-[34px] md:text-[46px] font-semibold tracking-tight text-[#111] leading-none">Котировки</h2>
-            <p className="text-gray-500 mt-3">₽ за тонну с НДС · самовывоз со склада производителя</p>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+          <h2 className="text-[28px] md:text-[34px] font-semibold tracking-tight text-[#111] leading-none">Котировки</h2>
           <div className="flex items-center gap-2 text-xs">
             {mode === "demo" && <span className="rounded-full bg-amber-50 text-amber-800 px-3 py-1 font-medium">демо-данные</span>}
             <span className="inline-flex items-center gap-2 rounded-full bg-[#f3f8ee] text-[#1F5A25] px-3 py-1 font-medium">
@@ -231,9 +226,9 @@ export default function Terminal() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-6 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-[180px_1fr] gap-5 items-start">
           {/* Культуры — вертикальный список сбоку (на телефоне — строка) */}
-          <nav aria-label="Культура" className="flex lg:flex-col gap-1 overflow-x-auto no-scrollbar -mx-4 px-4 lg:mx-0 lg:px-0 lg:sticky lg:top-6">
+          <nav aria-label="Культура" className="flex lg:flex-col gap-1 overflow-x-auto no-scrollbar -mx-4 px-4 lg:mx-0 lg:px-0 lg:sticky lg:top-4">
             {CROPS.map((c) => {
               const on = crop === c.id;
               return (
@@ -258,58 +253,54 @@ export default function Terminal() {
               <div className="rounded-2xl border border-dashed border-gray-300 p-10 text-center">
                 <p className="text-xl font-semibold text-gray-900">{cropInfo.name}: подключаем производителей</p>
                 <p className="text-gray-500 mt-2 max-w-md mx-auto">Котировки появятся, как только предприятия начнут присылать цены в бот.</p>
-                <button onClick={() => openLead("producer")} className="mt-6 rounded-xl bg-[#1F5A25] text-white px-5 py-3 font-semibold hover:bg-[#174a1c]">
-                  Подключить предприятие
-                </button>
               </div>
             ) : (
-              <>
-                {/* Окно терминала */}
-                <div className="rounded-2xl border border-[#e6ebe1] shadow-[0_1px_3px_rgba(16,40,20,0.05)]">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 md:px-6 py-4 border-b border-gray-100">
-                    <p className="text-lg font-semibold text-gray-900">{cropInfo.name}</p>
-                    <div className="flex items-center gap-2">
-                      <RegionPicker value={regions} onChange={setRegions} stats={live?.regionStats ?? new Map()} available={cropInfo.regions} />
-                      <button
-                        onClick={() => setMapOpen(true)}
-                        className="shrink-0 inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3.5 py-2.5 text-sm font-medium text-gray-700 hover:border-[#1F5A25]/40 hover:text-[#1F5A25] transition-colors"
-                      >
-                        <MapIcon size={16} />
-                        <span className="hidden sm:inline">На карте</span>
-                      </button>
-                    </div>
+              <div className="rounded-2xl border border-[#e6ebe1] shadow-[0_1px_3px_rgba(16,40,20,0.05)]">
+                {/* Шапка окна: культура, цена, регион */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-3.5 border-b border-gray-100">
+                  <div className="flex items-baseline gap-3 flex-wrap">
+                    <p className="text-base font-semibold text-gray-900">{cropInfo.name}</p>
+                    <p className="text-2xl font-bold tabular-nums text-[#111]">{s ? `${rub(s.index)} ₽/т` : "—"}</p>
+                    <Change value={live?.change ?? null} />
+                    <span className="text-xs text-gray-400">к вчера</span>
                   </div>
-
-                  <div className="grid grid-cols-1 xl:grid-cols-2 xl:divide-x divide-gray-100">
-                    <div className="p-5 md:p-6 min-w-0">{live && <OrderBook quotes={live.inS} />}</div>
-                    <div className="p-5 md:p-6 min-w-0 border-t xl:border-t-0 border-gray-100">
-                      {live && <ChartPanel today={today} history={history} latest={latest} scope={scope} nowTs={lastEventAt} minCount={minCount} />}
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <RegionPicker value={regions} onChange={setRegions} stats={live?.regionStats ?? new Map()} available={cropInfo.regions} />
+                    <button
+                      onClick={() => setMapOpen(true)}
+                      className="shrink-0 inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3.5 py-2.5 text-sm font-medium text-gray-700 hover:border-[#1F5A25]/40 hover:text-[#1F5A25] transition-colors"
+                    >
+                      <MapIcon size={16} />
+                      <span className="hidden sm:inline">На карте</span>
+                    </button>
                   </div>
                 </div>
 
-                {/* Сводка — компактно под окном */}
-                <div className="mt-4 flex flex-wrap items-center gap-x-8 gap-y-2 px-1 text-sm text-gray-500">
-                  <span>
-                    Средняя <b className="text-gray-900 tabular-nums">{s ? `${rub(s.index)} ₽/т` : "—"}</b> <Change value={live?.change ?? null} />
-                  </span>
-                  <span>
-                    Разброс <b className="text-gray-900 tabular-nums">{s ? `${rub(s.min)} – ${rub(s.max)}` : "—"}</b>
-                  </span>
-                  <span>
-                    Готовы отгрузить <b className="text-gray-900 tabular-nums">{s ? tons(s.volume) : "—"}</b>
-                  </span>
-                  <span>
-                    Предприятий <b className="text-gray-900 tabular-nums">{live?.inS.length ?? 0}</b> из {live?.total ?? 0}
-                  </span>
-                  <button
-                    onClick={() => openLead("exporter")}
-                    className="ml-auto inline-flex items-center gap-1.5 rounded-xl bg-[#1F5A25] text-white px-4 py-2 font-semibold hover:bg-[#174a1c] transition-colors"
-                  >
-                    Нужен объём <ArrowRight size={15} />
-                  </button>
+                {/* График */}
+                <div className="px-5 pt-4">
+                  {live && <ChartPanel today={today} history={history} latest={latest} scope={scope} nowTs={lastEventAt} minCount={minCount} />}
                 </div>
-              </>
+
+                {/* Стакан */}
+                <div className="px-2 md:px-5 pt-4 pb-4 mt-2 border-t border-gray-100">
+                  {live && <OrderBook asks={live.inS} bids={scopedBids} onBuyAt={(price, volume) => setBidDraft({ price, volume })} />}
+
+                  <div className="mt-3 px-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <button
+                      onClick={() => setBidDraft({})}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#2f7a1f] text-white px-4 py-2.5 text-sm font-semibold hover:bg-[#276719] transition-colors"
+                    >
+                      <Plus size={16} /> Заявка на покупку
+                    </button>
+                    <p className="text-xs text-gray-400 text-center sm:text-right">
+                      Нажмите на цену продавца, чтобы купить по ней ·{" "}
+                      <Link href={producerHref} className="text-[#c0492f] font-medium hover:underline">
+                        я производитель — подать цену
+                      </Link>
+                    </p>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -324,6 +315,18 @@ export default function Terminal() {
             setMapOpen(false);
           }}
           onClose={closeMap}
+        />
+      )}
+      {bidDraft && live && (
+        <BidDialog
+          cropName={cropInfo.name}
+          initialPrice={bidDraft.price}
+          initialVolume={bidDraft.volume}
+          initialRegions={regions}
+          available={cropInfo.regions}
+          stats={live.regionStats}
+          bestAsk={live.stats?.min}
+          onClose={closeBid}
         />
       )}
     </section>

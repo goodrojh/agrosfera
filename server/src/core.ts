@@ -7,7 +7,7 @@ import { latestAccepted, referenceInfo } from "../../lib/market/aggregate.ts";
 import { GREETING, HELP, replyToButton, replyToText, type ButtonId, type Pending } from "../../lib/market/dialog.ts";
 import { checkQuote, parseSubmission } from "../../lib/market/validate.ts";
 import { REGION_BY_ID } from "../../lib/market/regions.ts";
-import type { Company, Quote } from "../../lib/market/types.ts";
+import type { Bid, Company, Quote } from "../../lib/market/types.ts";
 
 /** События для SSE-потока сайта */
 export const bus = new EventEmitter();
@@ -18,6 +18,9 @@ export function publishQuote(q: Quote) {
 }
 export function publishCompany(c: Company) {
   bus.emit("company", c);
+}
+export function publishBid(b: Bid) {
+  bus.emit("bid", b);
 }
 
 export interface Incoming {

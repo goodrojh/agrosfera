@@ -15,7 +15,8 @@ const ROLES: { id: LeadRole; label: string }[] = [
 const inputCls =
   "w-full bg-[#15291a] border border-[#2c4131] rounded-[10px] px-4 py-3.5 text-white text-[14px] placeholder-[#6f806f] outline-none focus:border-[#8CC152]/60 transition-colors";
 
-export default function Footer({ className }: { className?: string }) {
+/** Подвал. withForm — форма заявки (на странице «Сотрудничество»); на главной только ссылки */
+export default function Footer({ className, withForm = true }: { className?: string; withForm?: boolean }) {
   const [role, setRole] = useState<LeadRole>("exporter");
   const [form, setForm] = useState({ name: "", contact: "", target: "china", volume: "", comment: "" });
   const [state, setState] = useState<"idle" | "sending" | "done" | "error">("idle");
@@ -29,6 +30,9 @@ export default function Footer({ className }: { className?: string }) {
       setState("idle");
     };
     window.addEventListener(LEAD_EVENT, onLead);
+    // Пришли с главной по кнопке заявки: ?role=exporter
+    const r = new URLSearchParams(window.location.search).get("role");
+    if (r === "exporter" || r === "agent" || r === "producer") onLead(new CustomEvent(LEAD_EVENT, { detail: r }));
     return () => window.removeEventListener(LEAD_EVENT, onLead);
   }, []);
 
@@ -63,20 +67,22 @@ export default function Footer({ className }: { className?: string }) {
     }
   };
 
-  const botHref = TELEGRAM_BOT_URL || "#bot";
-  const maxHref = MAX_BOT_URL || "#bot";
+  const coop = (hash: string) => asset(`/sotrudnichestvo/${hash}`);
+  const botHref = TELEGRAM_BOT_URL || coop("#bot");
+  const maxHref = MAX_BOT_URL || coop("#bot");
 
   const columns = [
-    { title: "Инструмент", links: [["Котировки", "#terminal"], ["Инструкция", "#instrukciya"], ["Методика", "#metodika"], ["FAQ", "#faq"]] },
-    { title: "Партнёрам", links: [["Производителям", "#partneram"], ["Экспортёрам", "#partneram"], ["Агентам", "#partneram"]] },
-    { title: "Бот", links: [["Telegram", botHref], ["MAX", maxHref], ["Симулятор", "#bot"]] },
-    { title: "Контакты", links: CONTACT_EMAIL ? [[CONTACT_EMAIL, `mailto:${CONTACT_EMAIL}`], ["Оставить заявку", "#zayavka"]] : [["Оставить заявку", "#zayavka"]] },
+    { title: "Инструмент", links: [["Котировки", asset("/#terminal")], ["Попробовать бота", coop("#bot")]] },
+    { title: "Сотрудничество", links: [["Производителям", coop("#partneram")], ["Экспортёрам", coop("#partneram")], ["Агентам", coop("#partneram")], ["Инструкция", coop("#instrukciya")]] },
+    { title: "Бот", links: [["Telegram", botHref], ["MAX", maxHref]] },
+    { title: "Контакты", links: [...(CONTACT_EMAIL ? [[CONTACT_EMAIL, `mailto:${CONTACT_EMAIL}`]] : []), ["Оставить заявку", coop("#zayavka")], ["Вопросы и ответы", coop("#faq")]] },
   ];
 
   return (
-    <footer className={"w-full pt-20 bg-[#f6f8f2] " + (className || "")}>
+    <footer className={"w-full " + (withForm ? "pt-20 bg-[#f6f8f2] " : "") + (className || "")}>
       <div className="w-full bg-[#07160a] overflow-hidden">
         {/* Заявка */}
+        {withForm && (
         <div id="zayavka" className="px-4 md:px-20 py-14 md:py-16 grid lg:grid-cols-[1fr_1.4fr] gap-10 border-b border-[#1d3322] scroll-mt-6">
           <div>
             <h2 className="text-white font-bold text-[28px] md:text-[34px] leading-[1.2] max-w-[360px] mb-4">Оставить заявку</h2>
@@ -163,6 +169,7 @@ export default function Footer({ className }: { className?: string }) {
             )}
           </AnimatePresence>
         </div>
+        )}
 
         {/* Ссылки */}
         <div className="px-4 md:px-20 py-14 grid grid-cols-2 lg:grid-cols-4 gap-8 border-b border-[#1d3322]">

@@ -11,9 +11,8 @@ import { asset, TELEGRAM_BOT_URL } from "@/lib/config";
 
 const NAV = [
   { label: "Котировки", href: "#terminal" },
-  { label: "Инструкция", href: "#instrukciya" },
-  { label: "Партнёрам", href: "#partneram" },
-  { label: "FAQ", href: "#faq" },
+  { label: "Сотрудничество", href: asset("/sotrudnichestvo/") },
+  { label: "Инструкция", href: asset("/sotrudnichestvo/#instrukciya") },
 ];
 
 export default function Hero({ className }: { className?: string }) {
@@ -33,7 +32,7 @@ export default function Hero({ className }: { className?: string }) {
     return () => io.disconnect();
   }, []);
 
-  const botHref = TELEGRAM_BOT_URL || "#bot";
+  const botHref = TELEGRAM_BOT_URL || asset("/sotrudnichestvo/#bot");
 
   // Живая цена прямо на первом экране
   const { ready, latest, history, crop } = useMarket();
@@ -87,7 +86,7 @@ export default function Hero({ className }: { className?: string }) {
                 Подать цену
               </a>
               <a
-                href="#zayavka"
+                href={asset("/sotrudnichestvo/#zayavka")}
                 className="rounded-full px-4 md:px-5 py-2 text-sm md:text-[15px] font-semibold bg-white text-[#0d2410] hover:bg-white/90 transition-all hover:scale-105 active:scale-95"
               >
                 Оставить заявку

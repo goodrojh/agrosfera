@@ -2,13 +2,22 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { config, mskDay } from "./config.ts";
-import { companies, leads, quotes } from "./db.ts";
-import { bus } from "./core.ts";
-import type { Company, Quote } from "../../lib/market/types.ts";
+import { bids, companies, leads, quotes } from "./db.ts";
+import { bus, publishBid } from "./core.ts";
+import { computeIndex, latestAccepted } from "../../lib/market/aggregate.ts";
+import { checkBid } from "../../lib/market/validate.ts";
+import { isRegionId } from "../../lib/market/regions.ts";
+import type { Bid, Company, Quote } from "../../lib/market/types.ts";
 
 export let notifyLead: (text: string) => void = () => {};
 export function setLeadNotifier(fn: typeof notifyLead) {
   notifyLead = fn;
+}
+
+/** Новая заявка покупателя — в админ-чат с кнопкой «Снять» */
+export let notifyBid: (b: Bid, who: string) => void = () => {};
+export function setBidNotifier(fn: typeof notifyBid) {
+  notifyBid = fn;
 }
 
 function cors(res: ServerResponse) {
@@ -44,6 +53,8 @@ function allowLead(ip: string): boolean {
   leadHits.set(ip, hits);
   return true;
 }
+const clientIp = (req: IncomingMessage) =>
+  String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
 
 const ROLE_LABEL: Record<string, string> = { exporter: "Экспортёр", agent: "Агент", producer: "Производитель" };
 const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
@@ -68,6 +79,7 @@ export function startApi() {
           companies: companies.publicList(),
           today: quotes.ofDay(today),
           history: quotes.history(today),
+          bids: bids.active(),
           serverTime: Date.now(),
         });
       }
@@ -83,8 +95,10 @@ export function startApi() {
         let day = mskDay(Date.now());
         const onQuote = (q: Quote) => res.write(`event: quote\ndata: ${JSON.stringify(q)}\n\n`);
         const onCompany = (c: Company) => res.write(`event: company\ndata: ${JSON.stringify(c)}\n\n`);
+        const onBid = (b: Bid) => res.write(`event: bid\ndata: ${JSON.stringify(b)}\n\n`);
         bus.on("quote", onQuote);
         bus.on("company", onCompany);
+        bus.on("bid", onBid);
         const ping = setInterval(() => {
           res.write(": ping\n\n");
           // Наступил новый день — сайт перезагрузит снимок
@@ -98,12 +112,33 @@ export function startApi() {
           clearInterval(ping);
           bus.off("quote", onQuote);
           bus.off("company", onCompany);
+          bus.off("bid", onBid);
         });
         return;
       }
 
+      if (req.method === "POST" && url.pathname === "/api/bids") {
+        const ip = clientIp(req);
+        if (!allowLead(ip)) return json(res, 429, { error: "Слишком много заявок, попробуйте позже" });
+        const body = JSON.parse(await readBody(req));
+        const price = Math.round(Number(body.price));
+        const volume = Math.round(Number(body.volume));
+        const regions = Array.isArray(body.regions) ? body.regions.filter((r: unknown) => typeof r === "string" && isRegionId(r)) : [];
+        const name = clip(body.name, 120);
+        const contact = clip(body.contact, 120);
+        if (body.crop && body.crop !== "flax") return json(res, 400, { error: "Пока принимаем заявки только на лён" });
+        const reference = computeIndex([...latestAccepted(quotes.ofDay(mskDay(Date.now()))).values()])?.index;
+        const err = checkBid(price, volume, reference);
+        if (err) return json(res, 400, { error: err });
+        if (name.length < 2 || contact.length < 5) return json(res, 400, { error: "Укажите имя и телефон / Telegram" });
+        const bid = bids.insert({ crop: "flax", price, volume, regions, name, contact, ip });
+        publishBid(bid);
+        notifyBid(bid, `${name} · ${contact}`);
+        return json(res, 200, { ok: true, bid });
+      }
+
       if (req.method === "POST" && url.pathname === "/api/leads") {
-        const ip = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
+        const ip = clientIp(req);
         if (!allowLead(ip)) return json(res, 429, { error: "Слишком много заявок, попробуйте позже" });
         const body = JSON.parse(await readBody(req));
         const lead = {

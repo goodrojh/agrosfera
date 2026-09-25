@@ -2,8 +2,9 @@
 
 import { Bot, InlineKeyboard } from "grammy";
 import { config } from "./config.ts";
-import { handle, moderate, setModerationNotifier, type Outgoing } from "./core.ts";
-import { setLeadNotifier } from "./api.ts";
+import { handle, moderate, publishBid, setModerationNotifier, type Outgoing } from "./core.ts";
+import { bids } from "./db.ts";
+import { setBidNotifier, setLeadNotifier } from "./api.ts";
 import type { ButtonId } from "../../lib/market/dialog.ts";
 
 const rub = (n: number) => Math.round(n).toLocaleString("ru-RU");
@@ -46,6 +47,15 @@ export function startTelegram() {
       return;
     }
 
+    if (data.startsWith("bid:del:")) {
+      if (!config.adminChatId || String(ctx.chat?.id) !== config.adminChatId) return ctx.answerCallbackQuery();
+      const b = bids.remove(data.slice(8));
+      if (b) publishBid(b);
+      await ctx.answerCallbackQuery({ text: b ? "Заявка снята со стакана" : "Не найдено" });
+      await ctx.editMessageReplyMarkup().catch(() => {});
+      return;
+    }
+
     if (data.startsWith("b:")) {
       await ctx.answerCallbackQuery();
       await ctx.editMessageReplyMarkup().catch(() => {});
@@ -62,6 +72,13 @@ export function startTelegram() {
 
   if (config.adminChatId) {
     setLeadNotifier((text) => void bot.api.sendMessage(config.adminChatId, text).catch((e) => console.error(e.message)));
+    setBidNotifier((b, who) => {
+      const kb = new InlineKeyboard().text("🗑 Снять со стакана", `bid:del:${b.id}`);
+      const where = b.regions.length ? b.regions.join(", ") : "любые";
+      void bot.api
+        .sendMessage(config.adminChatId, `🟢 Заявка на покупку\n${rub(b.price)} ₽/т · ${rub(b.volume)} т\nРегионы: ${where}\n${who}`, { reply_markup: kb })
+        .catch((e) => console.error(e.message));
+    });
     setModerationNotifier((q, company) => {
       const kb = new InlineKeyboard().text("✅ В индекс", `mod:ok:${q.id}`).text("⛔ Отклонить", `mod:no:${q.id}`);
       void bot.api

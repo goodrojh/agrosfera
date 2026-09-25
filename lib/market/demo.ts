@@ -4,7 +4,7 @@
 import { REGIONS, REGION_BY_ID, type RegionId } from "./regions";
 import { dayKey, latestAccepted, referencePrice } from "./aggregate";
 import { checkQuote } from "./validate";
-import type { Company, DailyClose, MarketSnapshot, Quote } from "./types";
+import type { Bid, Company, DailyClose, MarketSnapshot, Quote } from "./types";
 
 export function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -37,6 +37,8 @@ function marketFactor(dayOffset: number): number {
 export interface DemoMarket {
   snapshot: MarketSnapshot;
   next(now: number, current: Quote[]): Quote;
+  /** Новая заявка покупателя (демо-поток спроса) */
+  nextBid(now: number, current: Quote[]): Bid;
   submit(companyId: string, regionId: RegionId, price: number, volume: number, now: number, current: Quote[], moderation?: boolean): Quote;
 }
 
@@ -206,14 +208,36 @@ export function createDemoMarket(now: number, opts: DemoOptions = {}): DemoMarke
     };
   }
 
+  // Спрос: покупатели обычно предлагают чуть ниже цен производителей
+  const bidRng = mulberry32((opts.seed ?? 20260925) + 17);
+  let bidSeq = 0;
+  function makeBid(at: number, current: Quote[], rand: () => number): Bid {
+    const asks = [...latestAccepted(current).values()].map((q) => q.price).sort((a, b) => a - b);
+    const lowAsk = asks[0] ?? regionPrice(regionList[0].id) * 0.95;
+    // Покупатели ставят ниже лучшей цены продавца: чаще рядом, реже — заметно ниже
+    const price = round50(lowAsk - 100 - Math.pow(rand(), 1.4) * lowAsk * 0.06);
+    const pick = regionList.filter(() => rand() < 0.25).slice(0, 3).map((r) => r.id);
+    return {
+      id: `b${(bidSeq++).toString(36)}${at.toString(36)}`,
+      price,
+      volume: Math.round((200 + rand() * 2800) / 50) * 50,
+      regions: rand() < 0.5 ? [] : pick,
+      at,
+      status: "active",
+    };
+  }
+  const bids: Bid[] = Array.from({ length: 11 }, (_, i) => makeBid(start + ((i + 1) / 12) * span, today, bidRng));
+
   return {
     snapshot: {
       companies: companies.map(({ id, code, regionId }) => ({ id, code, regionId })),
       today,
       history,
+      bids,
       serverTime: now,
     },
     next,
+    nextBid: (at, current) => makeBid(at, current, Math.random),
     submit,
   };
 }

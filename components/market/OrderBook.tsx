@@ -1,145 +1,147 @@
 "use client";
 
-import React, { memo, useMemo, useState } from "react";
+import React, { memo, useMemo } from "react";
 import { shortRegionName, type RegionId } from "@/lib/market/regions";
-import { rub, tons } from "@/lib/market/format";
-import type { Quote } from "@/lib/market/types";
+import { rub } from "@/lib/market/format";
+import type { Bid, Quote } from "@/lib/market/types";
+
+/** Сколько лучших цен показываем с каждой стороны — всё помещается без прокрутки */
+const ROWS = 8;
 
 interface Level {
   price: number;
   volume: number;
   count: number;
-  regions: { id: RegionId; volume: number }[];
+  own: boolean;
+  regions: RegionId[];
 }
 
-const GRID = "grid grid-cols-[1.5fr_1fr] gap-4";
+function aggregate(items: { price: number; volume: number; own?: boolean; regions: RegionId[] }[], desc: boolean): Level[] {
+  const map = new Map<number, Level>();
+  for (const it of items) {
+    let l = map.get(it.price);
+    if (!l) map.set(it.price, (l = { price: it.price, volume: 0, count: 0, own: false, regions: [] }));
+    l.volume += it.volume;
+    l.count += 1;
+    l.own ||= !!it.own;
+    for (const r of it.regions) if (!l.regions.includes(r)) l.regions.push(r);
+  }
+  return [...map.values()].sort((a, b) => (desc ? b.price - a.price : a.price - b.price));
+}
 
-const Row = memo(function Row({ l, best, inFill, maxLevel }: { l: Level; best: boolean; inFill: boolean; maxLevel: number }) {
-  const regions =
-    l.regions
-      .slice(0, 2)
-      .map((r) => shortRegionName(r.id))
-      .join(", ") + (l.regions.length > 2 ? ` +${l.regions.length - 2}` : "");
+const BidRow = memo(function BidRow({ l, max }: { l: Level; max: number }) {
   return (
     <div
-      title={l.regions.map((r) => `${shortRegionName(r.id)}: ${rub(r.volume)} т`).join("\n")}
-      className={`relative ${GRID} items-center px-3 py-2 rounded-lg ${inFill ? "bg-[#8CC152]/12" : ""}`}
+      className="relative h-8 flex items-center justify-between px-3 rounded-md"
+      title={l.regions.length ? `Готовы брать: ${l.regions.map(shortRegionName).join(", ")}` : "Готовы брать из любого региона"}
     >
-      {/* Вспышка при изменении уровня: новый key перезапускает CSS-анимацию */}
-      <span key={`${l.volume}-${l.count}`} className="agr-flash absolute inset-0 rounded-lg" />
-      <span className="relative min-w-0">
-        <span className="flex items-center gap-1.5">
-          <span className="text-[15px] font-bold tabular-nums text-[#1F5A25]">{rub(l.price)}</span>
-          {best && <span className="text-[10px] rounded bg-[#1F5A25] text-white px-1.5 py-px">лучшая</span>}
-        </span>
-        <span className="block text-[11px] text-gray-400 truncate">
-          {regions}
-          {l.count > 1 ? ` · ${l.count} предпр.` : ""}
-        </span>
+      <span key={`${l.volume}-${l.count}`} className="agr-flash absolute inset-0 rounded-md" />
+      <span
+        className="absolute right-0 inset-y-0.5 rounded-md bg-[#2f7a1f]/10 transition-[width] duration-500"
+        style={{ width: `${(l.volume / max) * 100}%` }}
+      />
+      <span className="relative flex items-center gap-1.5 text-[13px] tabular-nums text-gray-600">
+        {rub(l.volume)} т{l.own && <span className="text-[10px] rounded bg-[#2f7a1f] text-white px-1 py-px">ваша</span>}
       </span>
-      <span className="relative text-right text-sm font-semibold tabular-nums text-gray-900 py-1">
-        <span
-          className="absolute right-0 top-0 bottom-0 rounded-md bg-[#8CC152]/25 transition-[width] duration-500"
-          style={{ width: `${Math.max(10, (l.volume / maxLevel) * 100)}%` }}
-        />
-        <span className="relative pr-1.5">{rub(l.volume)} т</span>
-      </span>
+      <span className="relative text-sm font-bold tabular-nums text-[#2f7a1f]">{rub(l.price)}</span>
     </div>
   );
 });
 
-/** Стакан предложений: сколько тонн продают по каждой цене (цены точные, до рубля) */
-export default function OrderBook({ quotes }: { quotes: Quote[] }) {
-  const [need, setNeed] = useState("");
+const AskRow = memo(function AskRow({ l, max, onClick }: { l: Level; max: number; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="relative w-full h-8 flex items-center justify-between px-3 rounded-md hover:bg-gray-50 transition-colors"
+      title={`${l.regions.map(shortRegionName).join(", ")} · нажмите, чтобы оставить заявку по этой цене`}
+    >
+      <span key={`${l.volume}-${l.count}`} className="agr-flash absolute inset-0 rounded-md" />
+      <span
+        className="absolute left-0 inset-y-0.5 rounded-md bg-[#c0492f]/10 transition-[width] duration-500"
+        style={{ width: `${(l.volume / max) * 100}%` }}
+      />
+      <span className="relative text-sm font-bold tabular-nums text-[#c0492f]">{rub(l.price)}</span>
+      <span className="relative text-[13px] tabular-nums text-gray-600">{rub(l.volume)} т</span>
+    </button>
+  );
+});
 
-  const levels = useMemo<Level[]>(() => {
-    const map = new Map<number, { volume: number; count: number; regions: Map<RegionId, number> }>();
-    for (const q of quotes) {
-      let l = map.get(q.price);
-      if (!l) map.set(q.price, (l = { volume: 0, count: 0, regions: new Map() }));
-      l.volume += q.volume;
-      l.count += 1;
-      l.regions.set(q.regionId, (l.regions.get(q.regionId) ?? 0) + q.volume);
-    }
-    const out: Level[] = [];
-    for (const [price, l] of [...map.entries()].sort((a, b) => a[0] - b[0])) {
-      out.push({
-        price,
-        volume: l.volume,
-        count: l.count,
-        regions: [...l.regions.entries()].map(([id, volume]) => ({ id, volume })).sort((a, b) => b.volume - a.volume),
-      });
-    }
-    return out;
-  }, [quotes]);
+const Empty = () => <div className="h-8" />;
 
-  const maxLevel = Math.max(1, ...levels.map((l) => l.volume));
+/** Биржевой стакан: слева заявки покупателей, справа цены производителей */
+export default function OrderBook({
+  asks,
+  bids,
+  onBuyAt,
+}: {
+  asks: Quote[];
+  bids: Bid[];
+  /** Клик по цене продавца — оставить заявку по ней */
+  onBuyAt: (price: number, volume: number) => void;
+}) {
+  const askLevels = useMemo(() => aggregate(asks.map((q) => ({ price: q.price, volume: q.volume, regions: [q.regionId] })), false), [asks]);
+  const bidLevels = useMemo(() => aggregate(bids, true), [bids]);
 
-  // Сколько стоит собрать нужный объём, покупая от самых дешёвых предложений
-  const fill = useMemo(() => {
-    const n = Number(need);
-    if (!n) return null;
-    let left = n;
-    let cost = 0;
-    let maxPrice = 0;
-    let companies = 0;
-    for (const q of [...quotes].sort((a, b) => a.price - b.price || b.volume - a.volume)) {
-      if (left <= 0) break;
-      const take = Math.min(left, q.volume);
-      cost += take * q.price;
-      left -= take;
-      maxPrice = q.price;
-      companies += 1;
-    }
-    const filled = n - Math.max(0, left);
-    return { need: n, filled, enough: left <= 0, avg: filled ? cost / filled : 0, maxPrice, companies };
-  }, [need, quotes]);
+  const topAsks = askLevels.slice(0, ROWS);
+  const topBids = bidLevels.slice(0, ROWS);
+  const max = Math.max(1, ...topAsks.map((l) => l.volume), ...topBids.map((l) => l.volume));
+  const askTotal = asks.reduce((s, q) => s + q.volume, 0);
+  const bidTotal = bids.reduce((s, b) => s + b.volume, 0);
+  const spread = topAsks[0] && topBids[0] ? topAsks[0].price - topBids[0].price : null;
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="font-semibold text-gray-900">Стакан</p>
-          <p className="text-xs text-gray-400">предложения продавцов · сверху дешевле</p>
+    <div>
+      {/* Шапка: стороны и спред */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-3 mb-2">
+        <div className="px-3">
+          <p className="text-sm font-semibold text-[#2f7a1f]">Покупают</p>
+          <p className="text-xs text-gray-400 tabular-nums">
+            {rub(bidTotal)} т · заявок {bids.length}
+          </p>
         </div>
-        <label className="flex items-center gap-2 text-sm text-gray-500">
-          Нужно
-          <input
-            value={need}
-            onChange={(e) => setNeed(e.target.value.replace(/\D/g, "").slice(0, 6))}
-            inputMode="numeric"
-            placeholder=""
-            aria-label="Нужный объём, тонн"
-            className="w-20 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm text-right tabular-nums text-gray-900 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-[#1F5A25]/15 focus:border-[#1F5A25]/40"
-          />
-          т
-        </label>
+        <div className="text-center pb-0.5">
+          <p className="text-[11px] text-gray-400">{spread !== null && spread <= 0 ? "цены сошлись" : "спред"}</p>
+          <p className={"text-sm font-semibold tabular-nums " + (spread !== null && spread <= 0 ? "text-[#2f7a1f]" : "text-gray-700")}>
+            {spread === null ? "—" : spread <= 0 ? "сделка" : `${rub(spread)} ₽`}
+          </p>
+        </div>
+        <div className="px-3 text-right">
+          <p className="text-sm font-semibold text-[#c0492f]">Продают</p>
+          <p className="text-xs text-gray-400 tabular-nums">
+            {rub(askTotal)} т · предпр. {asks.length}
+          </p>
+        </div>
       </div>
 
-      {fill && (
-        <p className={"mt-3 rounded-lg px-3 py-2 text-[13px] leading-snug " + (fill.enough ? "bg-[#f3f8ee] text-gray-700" : "bg-[#fdf1ee] text-[#a8402a]")}>
-          {fill.enough ? (
-            <>
-              <b className="text-gray-900 tabular-nums">{tons(fill.need)}</b> — средняя <b className="text-gray-900 tabular-nums">{rub(fill.avg)} ₽/т</b>, до{" "}
-              <span className="tabular-nums">{rub(fill.maxPrice)} ₽/т</span>, у {fill.companies} предпр.
-            </>
-          ) : (
-            <>
-              Сейчас в продаже только <b className="tabular-nums">{tons(fill.filled)}</b>. Оставьте заявку — соберём остальное.
-            </>
-          )}
-        </p>
-      )}
-
-      <div className={`${GRID} px-3 pt-4 pb-1.5 text-[11px] text-gray-400`}>
-        <span>Цена, ₽/т</span>
-        <span className="text-right">Объём</span>
+      <div className="grid grid-cols-2 gap-3 md:gap-6">
+        <div>
+          <div className="flex justify-between px-3 pb-1 text-[11px] text-gray-400">
+            <span>Объём</span>
+            <span>Цена, ₽/т</span>
+          </div>
+          {topBids.map((l) => (
+            <BidRow key={l.price} l={l} max={max} />
+          ))}
+          {Array.from({ length: ROWS - topBids.length }, (_, i) => (
+            <Empty key={i} />
+          ))}
+        </div>
+        <div>
+          <div className="flex justify-between px-3 pb-1 text-[11px] text-gray-400">
+            <span>Цена, ₽/т</span>
+            <span>Объём</span>
+          </div>
+          {topAsks.map((l) => (
+            <AskRow key={l.price} l={l} max={max} onClick={() => onBuyAt(l.price, l.volume)} />
+          ))}
+          {Array.from({ length: ROWS - topAsks.length }, (_, i) => (
+            <Empty key={i} />
+          ))}
+        </div>
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto max-h-[420px] agr-scroll">
-        {levels.map((l, i) => (
-          <Row key={l.price} l={l} best={i === 0} inFill={!!fill && l.price <= fill.maxPrice} maxLevel={maxLevel} />
-        ))}
-        {levels.length === 0 && <p className="text-sm text-gray-400 px-3 py-10 text-center">Сегодня предложений пока нет</p>}
+      <div className="grid grid-cols-2 gap-3 md:gap-6 mt-1 h-4 text-[11px] text-gray-400">
+        <span className="px-3">{bidLevels.length > ROWS ? `ещё ${bidLevels.length - ROWS} цен ниже` : ""}</span>
+        <span className="px-3 text-right">{askLevels.length > ROWS ? `ещё ${askLevels.length - ROWS} цен выше` : ""}</span>
       </div>
     </div>
   );

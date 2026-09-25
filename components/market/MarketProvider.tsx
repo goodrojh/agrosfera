@@ -3,10 +3,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "@/lib/config";
 import { createDemoMarket, type DemoMarket } from "@/lib/market/demo";
-import { latestAccepted } from "@/lib/market/aggregate";
+import { computeIndex, latestAccepted } from "@/lib/market/aggregate";
+import { checkBid } from "@/lib/market/validate";
 import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
 import type { RegionId } from "@/lib/market/regions";
-import type { Company, DailyClose, Quote } from "@/lib/market/types";
+import type { Bid, Company, DailyClose, Quote } from "@/lib/market/types";
 
 export const SIM_COMPANY_ID = "c-you";
 
@@ -24,8 +25,20 @@ interface MarketValue {
   history: DailyClose[];
   latest: Map<string, Quote>;
   lastEventAt: number;
+  /** Активные заявки покупателей по выбранной культуре */
+  bids: Bid[];
+  /** Разместить заявку на покупку. Возвращает текст ошибки или null */
+  submitBid: (input: BidInput) => Promise<string | null>;
   /** Подача из симулятора бота — всегда по льну */
   submitFromSimulator: (regionId: RegionId, price: number, volume: number, moderation?: boolean) => Quote | null;
+}
+
+export interface BidInput {
+  price: number;
+  volume: number;
+  regions: RegionId[];
+  name: string;
+  contact: string;
 }
 
 interface CropStore {
@@ -33,6 +46,7 @@ interface CropStore {
   companies: Company[];
   history: DailyClose[];
   today: Quote[];
+  bids: Bid[];
   lastEventAt: number;
 }
 
@@ -44,7 +58,7 @@ export function useMarket(): MarketValue {
   return ctx;
 }
 
-const EMPTY: CropStore = { demo: null, companies: [], history: [], today: [], lastEventAt: 0 };
+const EMPTY: CropStore = { demo: null, companies: [], history: [], today: [], bids: [], lastEventAt: 0 };
 
 function makeDemoStore(crop: CropId, now: number): CropStore {
   const c = CROP_BY_ID[crop];
@@ -58,6 +72,7 @@ function makeDemoStore(crop: CropId, now: number): CropStore {
     companies: demo.snapshot.companies,
     history: demo.snapshot.history,
     today: demo.snapshot.today,
+    bids: demo.snapshot.bids,
     lastEventAt: Math.max(...demo.snapshot.today.map((q) => q.at), now - 30_000),
   };
 }
@@ -76,6 +91,22 @@ export default function MarketProvider({ children }: { children: React.ReactNode
     const st = stores.current.get(c);
     if (!st) return;
     const next = { ...st, today: [...st.today.filter((x) => x.id !== q.id), q], lastEventAt: q.at };
+    stores.current.set(c, next);
+    if (cropRef.current === c) setActive(next);
+  }, []);
+
+  /** Добавить или обновить заявку покупателя */
+  const pushBid = useCallback((c: CropId, b: Bid) => {
+    const st = stores.current.get(c);
+    if (!st) return;
+    let bids = [...st.bids.filter((x) => x.id !== b.id), b].filter((x) => x.status === "active");
+    // В демо держим стакан спроса компактным: старые чужие заявки уходят
+    const others = bids.filter((x) => !x.own);
+    if (st.demo && others.length > 14) {
+      const oldest = others.reduce((a, x) => (x.at < a.at ? x : a));
+      bids = bids.filter((x) => x.id !== oldest.id);
+    }
+    const next = { ...st, bids, lastEventAt: Math.max(st.lastEventAt, b.at) };
     stores.current.set(c, next);
     if (cropRef.current === c) setActive(next);
   }, []);
@@ -108,13 +139,16 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       timer = setTimeout(() => {
         const c = cropRef.current;
         const s = stores.current.get(c);
-        if (!document.hidden && s?.demo) pushTo(c, s.demo.next(Date.now(), s.today));
+        if (!document.hidden && s?.demo) {
+          if (Math.random() < 0.2) pushBid(c, s.demo.nextBid(Date.now(), s.today));
+          else pushTo(c, s.demo.next(Date.now(), s.today));
+        }
         loop();
       }, 3500 + Math.random() * 3500);
     };
     loop();
     return () => clearTimeout(timer);
-  }, [mode, pushTo]);
+  }, [mode, pushTo, pushBid]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Боевой режим: снимок + поток событий с сервера бота (пока только лён)
@@ -135,6 +169,7 @@ export default function MarketProvider({ children }: { children: React.ReactNode
           companies: snap.companies,
           history: snap.history,
           today: snap.today,
+          bids: snap.bids ?? [],
           lastEventAt: Math.max(0, ...snap.today.map((q: Quote) => q.at)),
         };
         stores.current.set("flax", st);
@@ -151,6 +186,7 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       es.addEventListener("open", () => setConnected(true));
       es.addEventListener("error", () => setConnected(false));
       es.addEventListener("quote", (e) => pushTo("flax", JSON.parse((e as MessageEvent).data)));
+      es.addEventListener("bid", (e) => pushBid("flax", JSON.parse((e as MessageEvent).data)));
       es.addEventListener("company", (e) => {
         const c: Company = JSON.parse((e as MessageEvent).data);
         const st = stores.current.get("flax");
@@ -168,7 +204,38 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       es?.close();
       if (poll) clearInterval(poll);
     };
-  }, [mode, pushTo]);
+  }, [mode, pushTo, pushBid]);
+
+  const submitBid = useCallback(
+    async (input: BidInput): Promise<string | null> => {
+      const c = cropRef.current;
+      const st = stores.current.get(c);
+      if (!st) return "Данные ещё загружаются";
+      const reference = computeIndex([...latestAccepted(st.today).values()])?.index;
+      const err = checkBid(input.price, input.volume, reference);
+      if (err) return err;
+      if (input.name.trim().length < 2 || input.contact.trim().length < 5) return "Укажите имя или компанию и телефон / Telegram — чтобы мы могли связаться.";
+
+      if (mode === "demo") {
+        pushBid(c, { id: `own${Date.now().toString(36)}`, price: input.price, volume: input.volume, regions: input.regions, at: Date.now(), status: "active", own: true });
+        return null;
+      }
+      try {
+        const res = await fetch(`${API_URL}/api/bids`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ crop: c, ...input }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return data.error ?? "Не удалось отправить заявку";
+        pushBid(c, { ...data.bid, own: true });
+        return null;
+      } catch {
+        return "Нет связи с сервером. Попробуйте ещё раз.";
+      }
+    },
+    [mode, pushBid]
+  );
 
   const submitFromSimulator = useCallback(
     (regionId: RegionId, price: number, volume: number, moderation = false): Quote | null => {
@@ -203,9 +270,11 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       history: active.history,
       latest,
       lastEventAt: active.lastEventAt,
+      bids: active.bids,
+      submitBid,
       submitFromSimulator,
     }),
-    [ready, mode, connected, crop, setCrop, supported, active, companyById, latest, submitFromSimulator]
+    [ready, mode, connected, crop, setCrop, supported, active, companyById, latest, submitBid, submitFromSimulator]
   );
 
   return <MarketContext.Provider value={value}>{children}</MarketContext.Provider>;
