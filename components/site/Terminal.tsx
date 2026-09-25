@@ -298,8 +298,10 @@ export default function Terminal() {
                         </span>
                         {bad ? (
                           <span className="text-[11px] text-[#c0492f] shrink-0">{q.status === "moderation" ? "на проверке" : "не учтено"}</span>
-                        ) : q.revision > 1 && q.prevPrice ? (
+                        ) : q.revision > 1 && q.prevPrice && q.prevPrice !== q.price ? (
                           <span className="text-[11px] text-gray-500 shrink-0 tabular-nums">было {rub(q.prevPrice)}</span>
+                        ) : q.revision > 1 ? (
+                          <span className="text-[11px] text-gray-500 shrink-0">обновлён объём</span>
                         ) : (
                           <span className="text-[11px] text-[#2f7a1f] shrink-0">новая</span>
                         )}
