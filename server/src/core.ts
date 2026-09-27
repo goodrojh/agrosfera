@@ -1,17 +1,15 @@
 // Логика бота, общая для Telegram и MAX.
-// Цены принимаются только от участников с открытым доступом (галочка в панели управления)
-// и только по культурам, закреплённым за карточкой участника.
+// Каждое утро предприятие присылает одной строкой цену, объём и качество по каждой закреплённой культуре.
+// Ответы принимаются только от предприятий с открытым доступом (галочка в панели управления).
 
 import { EventEmitter } from "node:events";
-import { config, mskDay } from "./config.ts";
+import { config } from "./config.ts";
 import { companies, members, quotes, type Channel, type CompanyRow } from "./db.ts";
-import { latestAccepted, referenceInfo } from "../../lib/market/aggregate.ts";
-import { replyToButton, replyToText, type ButtonId, type Pending } from "../../lib/market/dialog.ts";
-import { checkQuote, parseSubmission } from "../../lib/market/validate.ts";
+import { activeOffers, OFFER_TTL, referenceInfo } from "../../lib/market/aggregate.ts";
+import { describe, formatHint, replyToButton, replyToText, type ButtonId, type Pending } from "../../lib/market/dialog.ts";
 import { REGION_BY_ID } from "../../lib/market/regions.ts";
 import { CROPS, CROP_BY_ID, type CropId } from "../../lib/market/crops.ts";
-import type { Bid, Company, Quote } from "../../lib/market/types.ts";
-import { onQuote } from "./matching.ts";
+import type { Company, Quote } from "../../lib/market/types.ts";
 
 /** События для SSE-потока сайта */
 export const bus = new EventEmitter();
@@ -22,9 +20,6 @@ export function publishQuote(q: Quote) {
 }
 export function publishCompany(c: Company) {
   bus.emit("company", c);
-}
-export function publishBid(b: Bid) {
-  bus.emit("bid", b);
 }
 
 export interface Incoming {
@@ -71,15 +66,14 @@ const rounds = new Map<string, Round>();
 const rub = (n: number) => Math.round(n).toLocaleString("ru-RU");
 const INVITE_RE = /^[A-Z0-9]{8}$/i;
 const SKIP_RE = /^(нет|не продаём|не продаем|нету|0|-|—|пропуск|пропустить)$/i;
-const applyUrl = () => `${config.siteUrl}/sotrudnichestvo/?role=producer#zayavka`;
+const applyUrl = () => `${config.siteUrl}/sotrudnichestvo/#partner`;
 
 const cropList = (crops: CropId[]) => crops.map((c) => CROP_BY_ID[c].name).join(", ");
 
 function askCrop(crop: CropId, index: number, total: number): Outgoing {
+  const c = CROP_BY_ID[crop];
   return {
-    text:
-      `${total > 1 ? `${index}/${total}. ` : ""}${CROP_BY_ID[crop].name}\n` +
-      `Цена за тонну (₽ с НДС, самовывоз со склада) и свободный объём.\nНапример: ${Math.round(CROP_BY_ID[crop].basePrice / 500) * 500} 200`,
+    text: `${total > 1 ? `${index}/${total}. ` : ""}${c.name}\n${formatHint(c.quality, c.basePrice)}\n\nЦена — ₽ за тонну с НДС, самовывоз со склада; объём — тонн; показатели — в %.`,
     buttons: [{ id: "skip", label: "Сегодня нет в продаже" }],
   };
 }
@@ -88,8 +82,8 @@ function guest(): Outgoing[] {
   return [
     {
       text:
-        "Бот АгроСферы принимает цены только от участников, с которыми мы уже поговорили и открыли доступ.\n\n" +
-        `Если вы ещё не подавали анкету — заполните её на сайте: ${applyUrl()}\n\n` +
+        "Бот АгроСферы работает с предприятиями-партнёрами, которые прошли проверку.\n\n" +
+        `Чтобы стать партнёром, заполните анкету на сайте: ${applyUrl()}\n\n` +
         "Если анкета одобрена — нажмите «Отправить номер», и мы найдём вашу карточку.",
       requestContact: true,
     },
@@ -103,14 +97,18 @@ function statusText(c: CompanyRow): string | null {
   return null;
 }
 
-/** Начать опрос цен по всем закреплённым культурам */
-export function beginRound(channel: Channel, userId: string, company: CompanyRow, greeting = true): Outgoing[] {
+const GREETING = {
+  morning: (list: string) => `Доброе утро! Пришлите, пожалуйста, предложение на сегодня${list}.`,
+  reminder: (list: string) => `Напоминаем: ждём ваше предложение на сегодня${list}. Без ответа предложение уйдёт из сводки через 3 дня.`,
+};
+
+/** Начать опрос по всем закреплённым культурам */
+export function beginRound(channel: Channel, userId: string, company: CompanyRow, greeting: keyof typeof GREETING | false = "morning"): Outgoing[] {
   const queue = [...company.crops];
   if (!queue.length) return [{ text: statusText(company)! }];
   rounds.set(`${channel}:${userId}`, { queue, accepted: [] });
-  const intro: Outgoing[] = greeting
-    ? [{ text: `Доброе утро! Пришлите, пожалуйста, цены на сегодня${queue.length > 1 ? ` по культурам: ${cropList(queue)}` : ""}.` }]
-    : [];
+  const list = queue.length > 1 ? ` по культурам: ${cropList(queue)}` : "";
+  const intro: Outgoing[] = greeting ? [{ text: GREETING[greeting](list) }] : [];
   return [...intro, askCrop(queue[0], 1, queue.length)];
 }
 
@@ -118,7 +116,7 @@ function link(msg: Incoming, company: CompanyRow, via: string): Outgoing[] {
   members.link(msg.channel, msg.userId, company.id, msg.userName ?? msg.userHandle);
   notifyAdmin(`🔗 ${company.name} (${company.code}) подключился к боту: ${msg.userHandle ?? msg.userName ?? msg.userId} · ${via}`);
   const head: Outgoing = {
-    text: `Здравствуйте! Предприятие ${company.name} подключено к АгроСфере.\nКультуры: ${cropList(company.crops) || "пока не закреплены"}.\n\nКаждое утро бот будет спрашивать цены и свободный объём. Цена изменилась — просто пришлите новую.`,
+    text: `Здравствуйте! Предприятие ${company.name} подключено к АгроСфере.\nКультуры: ${cropList(company.crops) || "пока не закреплены"}.\n\nКаждое утро в 8:00 по вашему времени бот попросит цену, объём и качество. Изменилось что-то днём — просто пришлите новую строку.`,
     removeKeyboard: true,
   };
   return [head, ...beginRound(msg.channel, msg.userId, company, false)];
@@ -161,13 +159,10 @@ export function handle(msg: Incoming): Outgoing[] {
 
   const text = msg.text?.trim() ?? "";
   if (!msg.button) {
-    if (/^\/?(start|старт)$/i.test(text) || /^\/?(price|цены|цена)$/i.test(text)) return beginRound(msg.channel, msg.userId, company);
+    if (/^\/?(start|старт)$/i.test(text) || /^\/?(price|цены|цена)$/i.test(text)) return beginRound(msg.channel, msg.userId, company, false);
     if (/^\/?(help|помощь)$/i.test(text)) {
-      return [
-        {
-          text: `Бот спрашивает цены по вашим культурам: ${cropList(company.crops)}.\nОтвет — ЦЕНА ОБЪЁМ, например 31500 200. «нет» — сегодня не продаёте.\n/price — прислать цены сейчас, /status — мои цены сегодня.`,
-        },
-      ];
+      const lines = company.crops.map((c) => `• ${CROP_BY_ID[c].name}: ${formatHint(CROP_BY_ID[c].quality, CROP_BY_ID[c].basePrice).split("\n")[1]}`);
+      return [{ text: `Бот спрашивает предложения по вашим культурам — одной строкой.\n${lines.join("\n")}\n«нет» — сегодня не продаёте.\n/price — прислать сейчас, /status — мои предложения.` }];
     }
     if (/^\/?(status|статус)$/i.test(text)) return [statusToday(company)];
   }
@@ -207,78 +202,59 @@ function answer(msg: Incoming, company: CompanyRow, round: Round, text: string):
     return [
       {
         text: round.accepted.length
-          ? `Спасибо! Цены на сегодня приняты:\n${round.accepted.join("\n")}\n\nИзменятся — пришлите новые (/price).`
-          : "Понял, сегодня без предложений. Если появится объём — пришлите /price.",
+          ? `Спасибо! Опубликовали в сводке:\n${round.accepted.join("\n")}\n\nИзменится — пришлите /price.`
+          : "Понял, сегодня без предложений. Появится объём — пришлите /price.",
       },
     ];
   };
 
-  if (msg.button === "skip" || (!msg.button && SKIP_RE.test(text))) return next();
-
   const now = Date.now();
-  const today = mskDay(now);
-  const todayQuotes = quotes.ofDay(today, crop);
-  const latest = latestAccepted(todayQuotes);
-  const mine = latest.get(company.id);
-  const ref = referenceInfo(latest, company.regionId, company.id);
+  const offers = activeOffers(quotes.since(now - OFFER_TTL, crop), now);
+  const mine = offers.find((q) => q.companyId === company.id);
+  const revision = (mine?.revision ?? 0) + 1;
+
+  // «Сегодня нет в продаже» — снимаем предложение со сводки
+  if (msg.button === "skip" || (!msg.button && SKIP_RE.test(text))) {
+    publishQuote(quotes.insert({ crop, companyId: company.id, regionId: company.regionId, price: 0, volume: 0, at: now, status: "withdrawn", revision }, msg.channel));
+    return next();
+  }
+
+  const cropInfo = CROP_BY_ID[crop];
+  const ref = referenceInfo(offers, company.regionId, company.id);
   const ctx = {
     regionName: REGION_BY_ID[company.regionId].name,
     reference: ref?.price,
     referenceScope: ref?.scope,
-    previous: mine?.price ?? quotes.lastAcceptedBefore(company.id, today, crop)?.price,
+    previous: mine?.price,
+    quality: cropInfo.quality,
+    basePrice: cropInfo.basePrice,
   };
 
   const dialogButton = msg.button?.startsWith("b:") ? (msg.button.slice(2) as ButtonId) : undefined;
   const reply = dialogButton ? replyToButton(dialogButton, round.pending, ctx) : replyToText(text, ctx);
   round.pending = reply.pending;
 
-  // Явная ошибка — фиксируем на сайте как «не учтено» (в индекс не идёт)
-  if (!dialogButton && !reply.pending && !reply.accept) {
-    const parsed = parseSubmission(text);
-    if (parsed.ok && checkQuote(parsed.price, parsed.volume, ctx).level === "reject") {
-      publishQuote(
-        quotes.insert(
-          {
-            crop,
-            companyId: company.id,
-            regionId: company.regionId,
-            price: parsed.price,
-            volume: parsed.volume,
-            at: now,
-            status: "rejected",
-            revision: 0,
-            note: "Отклонено проверкой бота",
-          },
-          msg.channel
-        )
-      );
-    }
-  }
-
-  const cropName = CROP_BY_ID[crop].name;
   if (reply.accept) {
-    const revision = todayQuotes.filter((q) => q.companyId === company.id && q.status === "accepted").length + 1;
+    const { moderation, ...offer } = reply.accept;
     const q = quotes.insert(
       {
         crop,
         companyId: company.id,
         regionId: company.regionId,
-        price: reply.accept.price,
-        volume: reply.accept.volume,
+        ...offer,
         at: now,
-        status: reply.accept.moderation ? "moderation" : "accepted",
+        status: moderation ? "moderation" : "accepted",
         revision,
         prevPrice: mine?.price,
-        note: reply.accept.moderation ? "Отклонение от медианы — ручная проверка" : undefined,
+        note: moderation ? "Отклонение от медианы — ручная проверка" : undefined,
       },
       msg.channel
     );
     publishQuote(q);
-    onQuote(q);
-    if (reply.accept.moderation) notifyAdmin(`🔎 Цена на проверку: ${company.name} · ${cropName} · ${rub(q.price)} ₽/т · ${rub(q.volume)} т`);
-    const line = `${cropName}: ${rub(q.price)} ₽/т · ${rub(q.volume)} т`;
-    round.accepted.push(`• ${line}${reply.accept.moderation ? " (на проверке)" : ""}`);
-    return [{ text: `${reply.accept.moderation ? "📝" : "✅"} ${line}${reply.accept.moderation ? " — на проверке у модератора" : ""}` }, ...next()];
+    const line = `${cropInfo.name}: ${describe(offer, cropInfo.quality)}`;
+    if (moderation) notifyAdmin(`🔎 Цена на проверку: ${company.name} · ${line}`);
+    round.accepted.push(`• ${line}${moderation ? " (на проверке)" : ""}`);
+    return [{ text: reply.text }, ...next()];
   }
 
   return [
@@ -290,12 +266,12 @@ function answer(msg: Incoming, company: CompanyRow, round: Round, text: string):
 }
 
 function statusToday(company: CompanyRow): Outgoing {
-  const today = mskDay(Date.now());
+  const now = Date.now();
   const lines = company.crops.map((crop) => {
-    const q = latestAccepted(quotes.ofDay(today, crop)).get(company.id);
-    return `• ${CROP_BY_ID[crop].name}: ${q ? `${rub(q.price)} ₽/т · ${rub(q.volume)} т` : "не присылали"}`;
+    const q = activeOffers(quotes.since(now - OFFER_TTL, crop), now).find((x) => x.companyId === company.id);
+    return `• ${CROP_BY_ID[crop].name}: ${q ? describe({ ...q, moisture: q.moisture ?? 0, impurity: q.impurity ?? 0 }, CROP_BY_ID[crop].quality) : "нет в сводке"}`;
   });
-  return { text: `Ваши цены сегодня:\n${lines.join("\n")}` };
+  return { text: `Ваши предложения в сводке:\n${lines.join("\n")}` };
 }
 
 /** Решение модератора по цене */
@@ -305,6 +281,5 @@ export function moderate(quoteId: string, approve: boolean): Quote | undefined {
   quotes.setStatus(quoteId, approve ? "accepted" : "rejected", approve ? undefined : "Отклонено модератором");
   const updated = quotes.get(quoteId)!;
   publishQuote(updated);
-  onQuote(updated);
   return updated;
 }

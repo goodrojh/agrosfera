@@ -11,7 +11,7 @@ bus.on("quote", (q) => events.push(`${q.crop}:${q.status}:${q.price}`));
 const peers = ["А", "Б", "В"].map((n) => companies.create({ name: `Хозяйство ${n}`, regionId: "omsk", crops: ["flax"], status: "active" }));
 peers.forEach((p, i) => {
   handle({ channel: "telegram", userId: `peer${i}`, startPayload: p.inviteCode });
-  handle({ channel: "telegram", userId: `peer${i}`, text: `${31000 + i * 200} 150` });
+  handle({ channel: "telegram", userId: `peer${i}`, text: `${31000 + i * 200} 150 8 1.5 46` });
 });
 
 type Msg = Parameters<typeof handle>[0];
@@ -24,7 +24,7 @@ const say = (m: Msg) => {
 const u = { channel: "telegram" as const, userId: "new", userName: "Иван Петров", userHandle: "@ivan" };
 
 console.log("=== Незнакомый пользователь пишет в бот ===");
-say({ ...u, text: "31500 200" });
+say({ ...u, text: "31500 200 8 1.5 46" });
 
 console.log("=== Анкета с сайта: карточка «новая» ===");
 const card = companies.create({ name: "ООО «Тестовый Лён»", inn: "7707083893", regionId: "omsk", status: "new", crops: ["flax"], person: "Петров Иван", phone: "+7 913 123-45-67", source: "site" });
@@ -33,14 +33,16 @@ say({ ...u, phone: "89131234567" });
 console.log("=== Менеджер поговорил, закрепил лён и подсолнечник, поставил галочку «Доступ открыт» ===");
 companies.update(card.id, { status: "active", crops: ["flax", "sunflower"] });
 say({ ...u, phone: "89131234567" });
-say({ ...u, text: "30 150" });
+say({ ...u, text: "31500 150" });
+say({ ...u, text: "31 500 150 48 1,5 8" });
+say({ ...u, text: "30 150 8,5 1,2 45" });
 say({ ...u, button: "b:confirm" });
 say({ ...u, text: "нет" });
 
 console.log("=== Утро следующего дня: бот сам присылает запрос ===");
 for (const out of beginRound("telegram", "new", companies.get(card.id)!)) console.log(`${out.text}\n`);
-say({ ...u, text: "31200 180" });
-say({ ...u, text: "38500 300" });
+say({ ...u, text: "31200 180 7.8 1 47" });
+say({ ...u, text: "38500 300 7 2 49,5" });
 say({ ...u, text: "/status" });
 console.log("События для сайта:", events.join(", "));
 export {};

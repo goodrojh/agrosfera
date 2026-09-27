@@ -9,25 +9,33 @@ export interface Company {
   regionId: RegionId;
 }
 
-export type QuoteStatus = "accepted" | "moderation" | "rejected";
+/** withdrawn — предприятие ответило «сегодня нет в продаже», предложение снимается со сводки */
+export type QuoteStatus = "accepted" | "moderation" | "rejected" | "withdrawn";
 
-/** Одна подача цены из бота. Повторная подача за день — новая ревизия. */
-export interface Quote {
+/** Показатели качества партии, % */
+export interface QualityValues {
+  moisture?: number;
+  impurity?: number;
+  /** Масличность или протеин — в зависимости от культуры */
+  quality?: number;
+}
+
+/** Ответ предприятия боту: цена, объём и качество. Повторный ответ — новая ревизия. */
+export interface Quote extends QualityValues {
   id: string;
   /** Культура; у старых записей — лён */
   crop?: CropId;
   companyId: string;
   regionId: RegionId;
-  /** ₽/т с НДС, EXW склад предприятия */
+  /** ₽/т с НДС, самовывоз со склада предприятия */
   price: number;
   /** Свободный к отгрузке объём, т */
   volume: number;
-  /** Время подачи, ms */
+  /** Время ответа, ms */
   at: number;
   status: QuoteStatus;
-  /** 1 — первая подача за день, 2+ — обновление */
+  /** 1 — первый ответ за день, 2+ — обновление */
   revision: number;
-  /** Цена предыдущей ревизии (для ленты) */
   prevPrice?: number;
   /** Причина исключения из расчёта */
   note?: string;
@@ -42,36 +50,11 @@ export interface DailyClose {
   volume: number;
 }
 
-export type BuyerType = "exporter" | "agent";
-
-export const BUYER_LABEL: Record<BuyerType, string> = { exporter: "экспортёр", agent: "агент" };
-
-/** Заявка покупателя в стакане. Контакты наружу не отдаются. */
-export interface Bid {
-  id: string;
-  crop?: CropId;
-  /** ₽/т с НДС, EXW */
-  price: number;
-  /** Сколько тонн хотят купить */
-  volume: number;
-  /** Из каких регионов готовы брать; пусто — из любых */
-  regions: RegionId[];
-  /** Кто покупает */
-  buyer?: BuyerType;
-  at: number;
-  /** pending — ждёт проверки модератором и в стакане не показывается */
-  status: "pending" | "active" | "removed";
-  /** Заявка, оставленная в этом браузере */
-  own?: boolean;
-}
-
 export interface MarketSnapshot {
   companies: Company[];
-  /** Все подачи за сегодня, включая отклонённые */
-  today: Quote[];
+  /** Ответы предприятий за последние дни — из них складываются сводка и график за день */
+  recent: Quote[];
   /** Дневные закрытия за прошлые дни */
   history: DailyClose[];
-  /** Активные заявки покупателей */
-  bids: Bid[];
   serverTime: number;
 }

@@ -6,6 +6,12 @@ import { asset } from "@/lib/config";
 
 export type SiteSection = "quotes" | "coop" | "about" | "faq";
 
+/** Открыть общий запрос: на главной — окно заявки, с других страниц — переход на главную */
+export function openRequest() {
+  if (document.getElementById("terminal")) window.dispatchEvent(new Event("agr-request"));
+  else window.location.href = asset("/?zayavka=1#terminal");
+}
+
 const NAV: { id: SiteSection; label: string; href: string }[] = [
   { id: "quotes", label: "Котировки", href: "/#terminal" },
   { id: "coop", label: "Сотрудничество", href: "/sotrudnichestvo/" },
@@ -13,7 +19,7 @@ const NAV: { id: SiteSection; label: string; href: string }[] = [
   { id: "faq", label: "FAQ", href: "/faq/" },
 ];
 
-/** Шапка сайта: четыре раздела и вход в личный кабинет */
+/** Шапка сайта: четыре раздела и кнопка заявки */
 export default function SiteHeader({ active }: { active?: SiteSection }) {
   const [open, setOpen] = useState(false);
   return (
@@ -38,10 +44,10 @@ export default function SiteHeader({ active }: { active?: SiteSection }) {
         </nav>
 
         <div className="flex items-center gap-2">
-          <a href={asset("/kabinet/")} className="whitespace-nowrap rounded-lg bg-white text-[#0b1f0e] px-4 py-2 text-sm font-semibold hover:bg-white/90 transition-colors">
-            <span className="hidden sm:inline">Личный кабинет</span>
-            <span className="sm:hidden">Кабинет</span>
-          </a>
+          <button onClick={openRequest} className="whitespace-nowrap rounded-lg bg-white text-[#0b1f0e] px-4 py-2 text-sm font-semibold hover:bg-white/90 transition-colors">
+            <span className="hidden sm:inline">Оставить заявку</span>
+            <span className="sm:hidden">Заявка</span>
+          </button>
           <button onClick={() => setOpen((v) => !v)} aria-label="Меню" aria-expanded={open} className="md:hidden w-10 h-10 flex items-center justify-center rounded-lg text-white/80 hover:bg-white/10">
             {open ? <X size={20} /> : <Menu size={20} />}
           </button>

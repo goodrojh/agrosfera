@@ -1,4 +1,4 @@
-// Скриншоты для инструкции к терминалу (public/guide/*.png).
+// Скриншоты для инструкции к сводке (public/guide/*.webp).
 // 1) npm run build && python -m http.server 3100 --directory out
 // 2) node scripts/guide-shots.mjs http://127.0.0.1:3100
 // Нужен Microsoft Edge или Chrome (путь можно задать в BROWSER).
@@ -61,57 +61,70 @@ async function shot(name, { highlight, area, pad = 16 }) {
   await sleep(600);
   const r = await ev(`(() => { const e = ${area}; const b = e.getBoundingClientRect(); return { x: b.left + scrollX, y: b.top + scrollY, w: b.width, h: b.height }; })()`);
   const clip = { x: Math.max(0, r.x - pad), y: Math.max(0, r.y - pad), width: r.w + pad * 2, height: r.h + pad * 2, scale: 1 };
-  const res = await send("Page.captureScreenshot", { format: "png", clip, captureBeyondViewport: true });
-  writeFileSync(new URL(`${name}.png`, outDir), Buffer.from(res.data, "base64"));
+  const res = await send("Page.captureScreenshot", { format: "webp", quality: 88, clip, captureBeyondViewport: true });
+  writeFileSync(new URL(`${name}.webp`, outDir), Buffer.from(res.data, "base64"));
   console.log("saved", name);
 }
 
 const card = `document.querySelector('#terminal .rounded-2xl.border')`;
 const section = `document.querySelector('#terminal > div')`;
+const clickText = (scope, text) => ev(`[...document.querySelectorAll('${scope} button')].find(b => b.textContent.trim().startsWith(${JSON.stringify(text)})).click(); true`);
+const fill = (values) =>
+  ev(`(() => {
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    for (const [ph, v] of ${JSON.stringify(Object.entries(values))}) {
+      const i = [...document.querySelectorAll('[role=dialog] input')].find(x => x.placeholder === ph);
+      if (i) { set.call(i, v); i.dispatchEvent(new Event('input', { bubbles: true })); }
+    }
+    return true;
+  })()`);
 
 await open("/");
 await ev(`document.getElementById('terminal').scrollIntoView(); true`);
 await shot("1-crops", { highlight: `document.querySelector('nav[aria-label="Культура"]')`, area: section });
 await shot("2-region", { highlight: `document.querySelector('#terminal [role=combobox]').closest('.flex.items-center.gap-2')`, area: card });
-await shot("3-chart", { highlight: `document.querySelector('#terminal .px-5.pt-4')`, area: card });
-await shot("4-book", { highlight: `document.querySelector('#terminal .border-t.border-gray-100')`, area: card });
 
-// Карта: отметить два региона
-await ev(`[...document.querySelectorAll('#terminal button')].find(b => b.textContent.includes('На карте')).click(); true`);
+// Карта: отметить три региона и применить — дальше график покажет три линии
+await clickText("#terminal", "На карте");
 await sleep(900);
-await ev(`(() => { for (const n of ['Омская обл.', 'Алтайский край']) document.querySelector('path[aria-label="' + n + '"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); return true; })()`);
+await ev(`(() => { for (const n of ['Омская обл.', 'Алтайский край', 'Саратовская обл.']) document.querySelector('path[aria-label="' + n + '"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); return true; })()`);
 await shot("5-map", { area: `document.querySelector('[aria-label="Выбор регионов на карте"] > div')`, pad: 0 });
-await ev(`document.querySelector('[aria-label="Выбор регионов на карте"] [aria-label="Закрыть"]').click(); true`);
-await sleep(500);
+await clickText('[aria-label="Выбор регионов на карте"]', "Применить");
+await sleep(1500);
 
-// Сделка по цене предприятия
-await ev(`document.querySelector('#terminal button[title*="купить по этой цене"]').click(); true`);
+await clickText("#terminal", "Месяц");
+await sleep(1500);
+await shot("3-chart", { highlight: `document.querySelector('#terminal .px-5.pt-4')`, area: card });
+await shot("4-offers", { highlight: `document.querySelector('#terminal .px-5.pt-5')`, area: card });
+
+// Заявка на предложение
+await ev(`document.querySelector('#terminal table button').click(); true`);
 await sleep(900);
-await shot("6-deal", { area: `document.querySelector('[role=dialog] > div')`, pad: 0 });
+await fill({ "Имя": "Алексей", "Телефон": "+7 900 123-45-67", "Компания": "ООО «Экспорт»" });
+await sleep(400);
+await shot("6-lead", { area: `document.querySelector('[role=dialog] > div')`, pad: 0 });
 await ev(`document.querySelector('[role=dialog] [aria-label="Закрыть"]').click(); true`);
 await sleep(500);
 
-// Своя заявка в стакан
-await ev(`[...document.querySelectorAll('#terminal button')].find(b => b.textContent.includes('Поставить заявку')).click(); true`);
+// Общий запрос
+await clickText("#terminal", "Оставить запрос");
 await sleep(900);
-await ev(`(() => {
-  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-  const f = (ph, v) => { const i = [...document.querySelectorAll('[role=dialog] input')].find(x => x.placeholder === ph); set.call(i, v); i.dispatchEvent(new Event('input', { bubbles: true })); };
-  f('30 000', '30500'); f('500', '800');
-  return true;
-})()`);
+await fill({ "Имя": "Алексей", "Телефон": "+7 900 123-45-67" });
 await sleep(400);
-await shot("7-bid", { area: `document.querySelector('[role=dialog] > div')`, pad: 0 });
+await shot("7-request", { area: `document.querySelector('[role=dialog] > div')`, pad: 0 });
 
-// Производителю: бот
+// Предприятию: бот
 await open("/sotrudnichestvo/");
 await ev(`document.getElementById('bot').scrollIntoView(); true`);
-await ev(`[...document.querySelectorAll('#bot button')].find(b => b.textContent.trim() === '31500 200').click(); true`);
+await clickText("#bot", "31500 200 8 1.5 46");
 await sleep(1800);
-await shot("8-bot", { area: `document.querySelector('#bot .flex.flex-col.min-h-\\\\[520px\\\\]')`, pad: 0 });
+await shot("8-bot", { area: `document.querySelector('#bot input').closest('.rounded-2xl')`, pad: 0 });
 
 ws.close();
 spawnSync("taskkill", ["/PID", String(proc.pid), "/T", "/F"]);
 await sleep(500);
-rmSync(profile, { recursive: true, force: true });
+// Дочерние процессы браузера отпускают файлы не сразу — повторяем удаление профиля
+try {
+  rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 300 });
+} catch {}
 console.log("готово");

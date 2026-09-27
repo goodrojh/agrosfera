@@ -5,10 +5,18 @@ import { AnimatePresence, motion } from "framer-motion";
 import { SendHorizontal } from "lucide-react";
 import { SIM_COMPANY_ID, useMarket } from "@/components/market/MarketProvider";
 import { referenceInfo } from "@/lib/market/aggregate";
-import { GREETING, replyToButton, replyToText, type BotReply, type ButtonId, type Pending } from "@/lib/market/dialog";
+import { formatHint, replyToButton, replyToText, type BotReply, type ButtonId, type Pending } from "@/lib/market/dialog";
+import { CROP_BY_ID } from "@/lib/market/crops";
 import { REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
 import { asset } from "@/lib/config";
 import type { Quote } from "@/lib/market/types";
+
+// Симулятор принимает предложения по льну
+const FLAX = CROP_BY_ID.flax;
+const GREETING = `Доброе утро! Пришлите, пожалуйста, предложение на сегодня.
+
+${FLAX.name}
+${formatHint(FLAX.quality, FLAX.basePrice)}`;
 
 interface Msg {
   id: number;
@@ -18,13 +26,13 @@ interface Msg {
   used?: boolean;
 }
 
-const EMPTY_LATEST = new Map<string, Quote>();
-const EXAMPLES = ["31500 200", "30 150", "325000 150", "46000 120"];
+const NO_OFFERS: Quote[] = [];
+const EXAMPLES = ["31500 200 8 1.5 46", "31500 200", "30 150 8 1,5 46", "31500 200 46 1.5 8"];
 
 export default function BotSimulator() {
-  const { latest: marketLatest, crop, submitFromSimulator, mode } = useMarket();
-  // Бот принимает цены на лён — сравниваем только с рынком льна
-  const latest = crop === "flax" ? marketLatest : EMPTY_LATEST;
+  const { offers: marketOffers, crop, submitFromSimulator, mode } = useMarket();
+  // Бот принимает предложения по льну — сравниваем только с рынком льна
+  const offers = crop === "flax" ? marketOffers : NO_OFFERS;
   const [region, setRegion] = useState<RegionId>("omsk");
   const [msgs, setMsgs] = useState<Msg[]>([{ id: 0, from: "bot", text: GREETING }]);
   const [input, setInput] = useState("");
@@ -38,12 +46,14 @@ export default function BotSimulator() {
   }, [msgs, typing]);
 
   const ctx = () => {
-    const ref = referenceInfo(latest, region, SIM_COMPANY_ID);
+    const ref = referenceInfo(offers, region, SIM_COMPANY_ID);
     return {
       regionName: REGION_BY_ID[region].name,
       reference: ref?.price,
       referenceScope: ref?.scope,
-      previous: latest.get(SIM_COMPANY_ID)?.price,
+      previous: offers.find((q) => q.companyId === SIM_COMPANY_ID)?.price,
+      quality: FLAX.quality,
+      basePrice: FLAX.basePrice,
     };
   };
 
@@ -52,7 +62,10 @@ export default function BotSimulator() {
     setTimeout(() => {
       setTyping(false);
       pendingRef.current = reply.pending;
-      if (reply.accept) submitFromSimulator(region, reply.accept.price, reply.accept.volume, reply.accept.moderation);
+      if (reply.accept) {
+        const { moderation, ...offer } = reply.accept;
+        submitFromSimulator(region, offer, moderation);
+      }
       setMsgs((m) => [...m, { id: idRef.current++, from: "bot", text: reply.text, buttons: reply.buttons }]);
     }, 550);
   };
@@ -78,7 +91,7 @@ export default function BotSimulator() {
         <div className="flex items-center gap-3 min-w-0">
           <img src={asset("/brand/emblem.png")} alt="" className="w-9 h-9 rounded-full" />
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-gray-900 truncate">АгроСфера · бот котировок</p>
+            <p className="text-sm font-semibold text-gray-900 truncate">АгроСфера · бот для партнёров</p>
             <p className="text-[11px] text-[#1F5A25]">{typing ? "печатает…" : "Telegram · MAX"}</p>
           </div>
         </div>
@@ -166,7 +179,7 @@ export default function BotSimulator() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Например: 31500 200"
+            placeholder="Например: 31500 200 8 1.5 46"
             inputMode="text"
             className="flex-1 min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1F5A25]/20 focus:border-[#1F5A25]/40"
           />
@@ -175,7 +188,7 @@ export default function BotSimulator() {
           </button>
         </form>
         <p className="text-[10px] text-gray-400">
-          {mode === "demo" ? "Симулятор: так же ответит настоящий бот. Принятая цена попадает в стакан котировок." : "Симулятор для знакомства: данные не отправляются в бот."}
+          {mode === "demo" ? "Симулятор: так же ответит настоящий бот. Принятое предложение появляется в сводке." : "Симулятор для знакомства: данные не отправляются в бот."}
         </p>
       </div>
     </div>

@@ -1,12 +1,22 @@
 // Диалог бота: одинаковые ответы в Telegram, MAX и симуляторе на сайте.
+// Предприятие отвечает одной строкой: цена, объём, влажность, сорная примесь, масличность (протеин).
 
-import { checkQuote, parseSubmission, type CheckContext } from "./validate";
+import { checkQualityValues, checkQuote, parseOffer, type CheckContext } from "./validate";
+import { IMPURITY, MOISTURE, type QualitySpec } from "./crops";
 
 const rub = (n: number) => Math.round(n).toLocaleString("ru-RU");
+const pctText = (n: number) => `${String(n).replace(".", ",")}%`;
 
-export interface Pending {
+/** Цена, объём и качество партии */
+export interface Offer {
   price: number;
   volume: number;
+  moisture: number;
+  impurity: number;
+  quality?: number;
+}
+
+export interface Pending extends Offer {
   moderation: boolean;
   /** Цена исправлена по подсказке — перед приёмом проверить ещё раз */
   recheck: boolean;
@@ -17,95 +27,104 @@ export type ButtonId = "confirm" | "retry";
 export interface BotReply {
   text: string;
   buttons?: { id: ButtonId; label: string }[];
-  /** Ждём подтверждения этой подачи */
+  /** Ждём подтверждения этого ответа */
   pending?: Pending;
-  /** Подачу нужно записать */
-  accept?: { price: number; volume: number; moderation: boolean };
+  /** Ответ нужно записать */
+  accept?: Offer & { moderation: boolean };
 }
 
 export interface DialogContext extends CheckContext {
   regionName: string;
   /** Откуда опорная цена: медиана региона или всего рынка */
   referenceScope?: "region" | "market";
+  /** Третий показатель культуры: масличность или протеин (у нута — нет) */
+  quality: QualitySpec | null;
+  basePrice: number;
 }
 
-export const GREETING =
-  "Доброе утро! Пришлите цену за тонну масличного льна (с НДС, EXW) и свободный объём одним сообщением.\n\nФормат: ЦЕНА ОБЪЁМ\nНапример: 31500 200";
+/** Порядок чисел в ответе — для подсказок */
+export function fieldOrder(q: QualitySpec | null): string {
+  return ["цена", "объём", MOISTURE.label.toLowerCase(), IMPURITY.label.toLowerCase(), ...(q ? [q.label.toLowerCase()] : [])].join(", ");
+}
 
-export const HELP =
-  "Формат: ЦЕНА ОБЪЁМ — например, 31500 200.\nЦена — ₽ за тонну с НДС на складе предприятия, объём — сколько тонн готовы отгрузить.\nЦена изменилась — просто пришлите новое сообщение, котировка обновится.";
+/** Пример ответа: «31500 200 8 1.5 46» */
+export function example(q: QualitySpec | null, basePrice: number): string {
+  return [Math.round(basePrice / 500) * 500, 200, MOISTURE.typical, IMPURITY.typical, ...(q ? [q.typical] : [])].join(" ");
+}
 
-function acceptText(price: number, volume: number, ctx: DialogContext): string {
+export function formatHint(q: QualitySpec | null, basePrice: number): string {
+  return `Одной строкой: ${fieldOrder(q)}.\nНапример: ${example(q, basePrice)}`;
+}
+
+/** «31 500 ₽/т · 200 т · влажность 8% · сорная примесь 1,5% · масличность 46%» */
+export function describe(o: Offer, q: QualitySpec | null): string {
+  const parts = [`${rub(o.price)} ₽/т`, `${rub(o.volume)} т`, `влажность ${pctText(o.moisture)}`, `сорная примесь ${pctText(o.impurity)}`];
+  if (q && o.quality !== undefined) parts.push(`${q.label.toLowerCase()} ${pctText(o.quality)}`);
+  return parts.join(" · ");
+}
+
+function acceptText(o: Offer, ctx: DialogContext): string {
   return (
-    `✅ Принято: ${rub(price)} ₽/т · ${rub(volume)} т (${ctx.regionName}).` +
-    (ctx.reference
-      ? `\nМедиана ${ctx.referenceScope === "region" ? "по региону" : "по рынку"} сейчас: ${rub(ctx.reference)} ₽/т.`
-      : "") +
-    "\nЦена изменится — пришлите новую, мы обновим."
+    `✅ Принято: ${describe(o, ctx.quality)} (${ctx.regionName}).` +
+    (ctx.reference ? `\nМедиана ${ctx.referenceScope === "region" ? "по региону" : "по рынку"} сейчас: ${rub(ctx.reference)} ₽/т.` : "") +
+    "\nИзменится — пришлите новую строку, мы обновим."
   );
 }
 
-function evaluate(price: number, volume: number, ctx: DialogContext, recheck: boolean): BotReply {
-  const check = checkQuote(price, volume, ctx);
+function evaluate(o: Offer, ctx: DialogContext, recheck: boolean): BotReply {
+  const qualityError = checkQualityValues(o, ctx.quality, fieldOrder(ctx.quality));
+  if (qualityError) return { text: `⛔ ${qualityError}\n\n${formatHint(ctx.quality, ctx.basePrice)}` };
 
+  const check = checkQuote(o.price, o.volume, ctx);
   if (check.level === "reject") {
-    return { text: "⛔ " + check.issues.map((i) => i.message).join("\n") + "\n\nОтправьте, пожалуйста, ещё раз: ЦЕНА ОБЪЁМ." };
+    return { text: "⛔ " + check.issues.map((i) => i.message).join("\n") + `\n\n${formatHint(ctx.quality, ctx.basePrice)}` };
   }
-
   if (check.level === "confirm") {
-    const suggested = check.suggestion;
-    const lines = check.issues.map((i) => "• " + i.message).join("\n");
+    const fixed = { ...o, price: check.suggestion ?? o.price };
     return {
-      text: `Проверьте, пожалуйста:\n${lines}\n\nЦена: ${rub(suggested ?? price)} ₽/т\nОбъём: ${rub(volume)} т`,
+      text: `Проверьте, пожалуйста:\n${check.issues.map((i) => "• " + i.message).join("\n")}\n\n${describe(fixed, ctx.quality)}`,
       buttons: [
-        { id: "confirm", label: suggested ? `✅ Да, ${rub(suggested)} ₽/т` : "✅ Подтверждаю" },
+        { id: "confirm", label: check.suggestion ? `✅ Да, ${rub(check.suggestion)} ₽/т` : "✅ Подтверждаю" },
         { id: "retry", label: "✏️ Ввести заново" },
       ],
-      pending: {
-        price: suggested ?? price,
-        volume,
-        moderation: check.moderation,
-        recheck: suggested !== undefined || recheck,
-      },
+      pending: { ...fixed, moderation: check.moderation, recheck: check.suggestion !== undefined || recheck },
     };
   }
-
-  return { text: acceptText(price, volume, ctx), accept: { price, volume, moderation: false } };
+  return { text: acceptText(o, ctx), accept: { ...o, moderation: false } };
 }
 
 export function replyToText(input: string, ctx: DialogContext): BotReply {
-  const trimmed = input.trim();
-  if (/^\/?(start|старт)$/i.test(trimmed)) return { text: GREETING };
-  if (/^\/?(help|помощь)$/i.test(trimmed)) return { text: HELP };
-
-  const parsed = parseSubmission(trimmed);
+  const parsed = parseOffer(input, !!ctx.quality);
   if (!parsed.ok) {
-    if (parsed.reason === "one_number") {
-      return { text: `Вижу одно число — ${rub(parsed.numbers![0])}. Нужны два: цена за тонну и объём.\nНапример: 31500 200` };
+    const need = ctx.quality ? "5 чисел" : "4 числа";
+    if (parsed.reason === "missing" && parsed.numbers.length === 2) {
+      return { text: `Цену и объём вижу. Добавьте, пожалуйста, качество — ${fieldOrder(ctx.quality).split(", ").slice(2).join(", ")}.\nНапример: ${example(ctx.quality, ctx.basePrice)}` };
     }
-    if (parsed.reason === "too_many") return { text: "Не понял формат. Пришлите: ЦЕНА ОБЪЁМ, например 31500 200" };
-    return { text: HELP };
+    if (parsed.reason === "missing" || parsed.reason === "too_many") {
+      return { text: `Нужно ${need} — ${fieldOrder(ctx.quality)}. Вижу ${parsed.numbers.length}.\nНапример: ${example(ctx.quality, ctx.basePrice)}` };
+    }
+    return { text: formatHint(ctx.quality, ctx.basePrice) };
   }
-  return evaluate(parsed.price, parsed.volume, ctx, false);
+  return evaluate(parsed, ctx, false);
 }
 
 export function replyToButton(id: ButtonId, pending: Pending | undefined, ctx: DialogContext): BotReply {
-  if (id === "retry" || !pending) return { text: "Хорошо, пришлите цену и объём ещё раз: ЦЕНА ОБЪЁМ" };
+  if (id === "retry" || !pending) return { text: `Хорошо, пришлите ещё раз. ${formatHint(ctx.quality, ctx.basePrice)}` };
 
   if (pending.recheck) {
     // Цену поправили по подсказке — проверяем уже исправленное значение
     const again = checkQuote(pending.price, pending.volume, ctx);
     const rest = again.issues.filter((i) => i.code !== "thousands" && i.code !== "extra_zero");
-    if (rest.length > 0 && again.level !== "ok") {
-      return evaluate(pending.price, pending.volume, ctx, false);
-    }
+    if (rest.length > 0 && again.level !== "ok") return evaluate(pending, ctx, false);
   }
 
-  if (pending.moderation) {
+  const { moderation, recheck: _recheck, ...offer } = pending;
+  void _recheck;
+  if (moderation) {
     return {
-      text: `📝 Принято на проверку: ${rub(pending.price)} ₽/т · ${rub(pending.volume)} т.\nЦена заметно отличается от рынка — модератор сверит её и после этого добавит в котировку.`,
-      accept: { price: pending.price, volume: pending.volume, moderation: true },
+      text: `📝 Принято на проверку: ${describe(offer, ctx.quality)}.\nЦена заметно отличается от рынка — менеджер сверит её и после этого опубликует.`,
+      accept: { ...offer, moderation: true },
     };
   }
-  return { text: acceptText(pending.price, pending.volume, ctx), accept: { price: pending.price, volume: pending.volume, moderation: false } };
+  return { text: acceptText(offer, ctx), accept: { ...offer, moderation: false } };
 }

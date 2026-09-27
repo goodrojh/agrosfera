@@ -1,15 +1,16 @@
 // Расчёт индекса: медиана вместо среднего + отсечение выбросов по MAD.
 // Одна ошибочная цена не может сдвинуть котировку.
 
-import { REGIONS, REGION_BY_ID, type DirectionId, type RegionId } from "./regions";
+import type { RegionId } from "./regions";
 import type { DailyClose, Quote } from "./types";
 
+/** Какие регионы смотрим; пусто — вся Россия */
 export interface Scope {
-  direction: DirectionId | "all";
-  region: RegionId | null;
-  /** Несколько выбранных регионов (приоритетнее region и direction) */
-  regions?: RegionId[];
+  regions: RegionId[];
 }
+
+/** Предложение висит в сводке до нового ответа предприятия, но не дольше 3 дней */
+export const OFFER_TTL = 72 * 3600_000;
 
 export interface IndexStats {
   /** Медиана принятых цен после отсечения выбросов */
@@ -26,9 +27,11 @@ export interface IndexStats {
   excluded: number;
 }
 
-export interface SeriesPoint extends IndexStats {
+export interface SeriesPoint {
   t: number;
-  key: string;
+  index: number;
+  count: number;
+  volume: number;
 }
 
 export function median(sorted: number[]): number {
@@ -73,10 +76,7 @@ export function computeIndex(points: { price: number; volume: number }[]): Index
 }
 
 export function inScope(regionId: RegionId, scope: Scope): boolean {
-  if (scope.regions?.length) return scope.regions.includes(regionId);
-  if (scope.region) return regionId === scope.region;
-  if (scope.direction === "all") return true;
-  return REGION_BY_ID[regionId].directions.includes(scope.direction);
+  return scope.regions.length === 0 || scope.regions.includes(regionId);
 }
 
 export function dayKey(ms: number): string {
@@ -86,15 +86,31 @@ export function dayKey(ms: number): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
-/** Последняя принятая подача каждого предприятия за сегодня */
-export function latestAccepted(today: Quote[]): Map<string, Quote> {
+const shiftDay = (key: string, n: number) => dayKey(new Date(key + "T12:00:00").getTime() + n * 86_400_000);
+
+/** Последняя принятая цена каждого предприятия в списке */
+export function latestAccepted(quotes: Quote[]): Map<string, Quote> {
   const map = new Map<string, Quote>();
-  for (const q of today) {
+  for (const q of quotes) {
     if (q.status !== "accepted") continue;
     const cur = map.get(q.companyId);
     if (!cur || q.at >= cur.at) map.set(q.companyId, q);
   }
   return map;
+}
+
+/**
+ * Действующие предложения на момент t: последний ответ каждого предприятия за 3 дня.
+ * Ответ «сегодня нет в продаже» снимает предложение; цены на проверке не показываются.
+ */
+export function activeOffers(quotes: Quote[], t: number): Quote[] {
+  const last = new Map<string, Quote>();
+  for (const q of quotes) {
+    if (q.at > t || q.at < t - OFFER_TTL || (q.status !== "accepted" && q.status !== "withdrawn")) continue;
+    const cur = last.get(q.companyId);
+    if (!cur || q.at >= cur.at) last.set(q.companyId, q);
+  }
+  return [...last.values()].filter((q) => q.status === "accepted");
 }
 
 export function lastHistoryDay(history: DailyClose[]): string | null {
@@ -103,89 +119,73 @@ export function lastHistoryDay(history: DailyClose[]): string | null {
   return max;
 }
 
-/** Дневной ряд: история + сегодняшняя точка, пересчитываемая в реальном времени */
-export function dailySeries(
-  history: DailyClose[],
-  latest: Map<string, Quote>,
-  scope: Scope,
-  days: number,
-  now: number
-): SeriesPoint[] {
-  const byDay = new Map<string, { price: number; volume: number }[]>();
+const point = (t: number, pts: { price: number; volume: number }[]): SeriesPoint | null => {
+  const s = computeIndex(pts);
+  return s ? { t, index: s.index, count: s.count, volume: s.volume } : null;
+};
+
+/**
+ * За день: индекс с начала суток и после каждого ответа предприятий.
+ * Предложения прошлых дней учитываются, пока действуют (до 3 дней).
+ */
+export function intradaySeries(quotes: Quote[], scope: Scope, dayStart: number, now: number, minCount = 1): SeriesPoint[] {
+  const own = quotes.filter((q) => inScope(q.regionId, scope));
+  const times = [dayStart, ...own.filter((q) => q.at > dayStart && q.at <= now && (q.status === "accepted" || q.status === "withdrawn")).map((q) => q.at), now]
+    .sort((a, b) => a - b)
+    .filter((t, i, arr) => i === 0 || t !== arr[i - 1]);
+  const out: SeriesPoint[] = [];
+  for (const t of times) {
+    const offers = activeOffers(own, t);
+    if (offers.length < minCount) continue;
+    const p = point(t, offers);
+    if (p) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * По дням: для каждого дня — последние цены предприятий за этот и два предыдущих дня
+ * (так же, как предложения живут в сводке), плюс сегодняшняя точка в реальном времени.
+ */
+export function dailySeries(history: DailyClose[], quotes: Quote[], scope: Scope, days: number, now: number, minCount = 1): SeriesPoint[] {
+  const byCompany = new Map<string, DailyClose[]>();
   for (const h of history) {
     if (!inScope(h.regionId, scope)) continue;
-    let arr = byDay.get(h.day);
-    if (!arr) byDay.set(h.day, (arr = []));
-    arr.push({ price: h.price, volume: h.volume });
+    let arr = byCompany.get(h.companyId);
+    if (!arr) byCompany.set(h.companyId, (arr = []));
+    arr.push(h);
   }
-  const keys = [...byDay.keys()].sort().slice(-(days - 1));
+  const allDays = [...new Set(history.map((h) => h.day))].sort().slice(-(days - 1));
   const out: SeriesPoint[] = [];
-  for (const key of keys) {
-    const stats = computeIndex(byDay.get(key)!);
-    if (stats) out.push({ ...stats, key, t: new Date(key + "T12:00:00").getTime() });
+  for (const day of allDays) {
+    const from = shiftDay(day, -2);
+    const pts: DailyClose[] = [];
+    for (const closes of byCompany.values()) {
+      let best: DailyClose | undefined;
+      for (const c of closes) if (c.day >= from && c.day <= day && (!best || c.day > best.day)) best = c;
+      if (best) pts.push(best);
+    }
+    if (pts.length < minCount) continue;
+    const p = point(new Date(day + "T12:00:00").getTime(), pts);
+    if (p) out.push(p);
   }
-  const todayPts = [...latest.values()].filter((q) => inScope(q.regionId, scope));
-  const todayStats = computeIndex(todayPts);
-  if (todayStats) out.push({ ...todayStats, key: dayKey(now), t: now });
-  return out;
-}
-
-/** Внутридневной ряд: индекс после каждой принятой подачи.
- *  Линия начинается, когда цену прислали хотя бы minCount предприятий — иначе первые подачи дают ложный скачок. */
-export function intradaySeries(today: Quote[], scope: Scope, minCount = 5): SeriesPoint[] {
-  const sorted = today
-    .filter((q) => q.status === "accepted" && inScope(q.regionId, scope))
-    .sort((a, b) => a.at - b.at);
-  const current = new Map<string, { price: number; volume: number }>();
-  const out: SeriesPoint[] = [];
-  for (const q of sorted) {
-    current.set(q.companyId, { price: q.price, volume: q.volume });
-    if (current.size < minCount) continue;
-    const stats = computeIndex([...current.values()]);
-    if (stats) out.push({ ...stats, key: q.id, t: q.at });
+  const today = activeOffers(quotes.filter((q) => inScope(q.regionId, scope)), now);
+  if (today.length >= minCount) {
+    const p = point(now, today);
+    if (p) out.push(p);
   }
   return out;
 }
 
-export interface RegionRow {
-  regionId: RegionId;
-  stats: IndexStats | null;
-  change: number | null;
-  updatedAt: number | null;
-}
-
-export function regionRows(
-  latest: Map<string, Quote>,
-  history: DailyClose[],
-  direction: DirectionId | "all"
-): RegionRow[] {
-  const prevDay = lastHistoryDay(history);
-  return REGIONS.filter((r) => direction === "all" || r.directions.includes(direction)).map((r) => {
-    const pts = [...latest.values()].filter((q) => q.regionId === r.id);
-    const stats = computeIndex(pts);
-    const prev = computeIndex(history.filter((h) => h.day === prevDay && h.regionId === r.id));
-    return {
-      regionId: r.id,
-      stats,
-      change: stats && prev ? stats.index / prev.index - 1 : null,
-      updatedAt: pts.length ? Math.max(...pts.map((p) => p.at)) : null,
-    };
-  });
-}
-
-/** Опорная цена для проверки новой подачи: медиана региона (от 3 предприятий), иначе рынка */
-export function referenceInfo(
-  latest: Map<string, Quote>,
-  regionId: RegionId,
-  excludeCompany?: string
-): { price: number; scope: "region" | "market" } | undefined {
-  const all = [...latest.values()].filter((q) => q.companyId !== excludeCompany);
+/** Опорная цена для проверки нового ответа: медиана региона (от 3 предприятий), иначе рынка */
+export function referenceInfo(offers: Quote[], regionId: RegionId, excludeCompany?: string): { price: number; scope: "region" | "market" } | undefined {
+  const all = offers.filter((q) => q.companyId !== excludeCompany);
   const region = all.filter((q) => q.regionId === regionId);
   const useRegion = region.length >= 3;
   const stats = computeIndex(useRegion ? region : all);
   return stats ? { price: stats.index, scope: useRegion ? "region" : "market" } : undefined;
 }
 
-export function referencePrice(latest: Map<string, Quote>, regionId: RegionId, excludeCompany?: string): number | undefined {
-  return referenceInfo(latest, regionId, excludeCompany)?.price;
+export function referencePrice(offers: Quote[], regionId: RegionId, excludeCompany?: string): number | undefined {
+  return referenceInfo(offers, regionId, excludeCompany)?.price;
 }

@@ -11,7 +11,7 @@ export default function Home() {
       <main className="min-h-screen bg-white">
         <Hero />
         <Terminal />
-        <Footer withForm={false} />
+        <Footer />
       </main>
     </MarketProvider>
   );

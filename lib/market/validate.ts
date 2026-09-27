@@ -1,6 +1,8 @@
 // Разбор сообщения от предприятия и защита от ошибочных цен.
 // Один и тот же код работает в боте (server/) и в симуляторе на сайте.
 
+import { IMPURITY as IMPURITY_RANGE, MOISTURE as MOISTURE_RANGE } from "./crops";
+
 export const LIMITS = {
   /** Допустимый диапазон цены, ₽/т с НДС */
   priceMin: 10_000,
@@ -18,110 +20,68 @@ export const LIMITS = {
   revisionJump: 0.12,
 } as const;
 
-export type ParseResult =
-  | { ok: true; price: number; volume: number }
-  | { ok: false; reason: "empty" | "no_numbers" | "one_number" | "too_many"; numbers?: number[] };
-
 // \b в JS не работает с кириллицей, поэтому границу слова задаём через (?![а-яa-z])
 const NB = "(?![а-яa-z])";
 const THOUSAND_SUFFIX = new RegExp(String.raw`^\s*(тыс\.?|тысяч[а-я]*|т\.р\.?|тр${NB}|к${NB}|k${NB})`);
 
-function toNumber(raw: string): number {
-  return Number(raw.replace(/[\s  ]/g, "").replace(",", "."));
-}
+/** Число: «31500», «1,5», «8.5». Запятая — десятичная, только если за ней 1–2 цифры: «31500,200» — это два числа */
+const NUM = /\d+(?:[.,]\d{1,2}(?!\d))?/g;
 
-/** Число вида «32 500», «32500», «32,5», «32.5 тыс» */
-const NUM = /(\d{1,3}(?:[   ]\d{3})+(?![\d.,])|\d+(?:[.,]\d+)?)/g;
+export type OfferParse =
+  | { ok: true; price: number; volume: number; moisture: number; impurity: number; quality?: number }
+  | { ok: false; reason: "empty" | "no_numbers" | "missing" | "too_many"; numbers: number[] };
 
-function readNumber(text: string, match: RegExpExecArray): number {
-  let value = toNumber(match[1]);
-  const tail = text.slice(match.index + match[0].length);
-  if (THOUSAND_SUFFIX.test(tail)) value *= 1000;
-  return value;
-}
+/** Сколько чисел в ответе: цена, объём, влажность, сорная примесь и (если есть у культуры) масличность / протеин */
+export const offerFields = (withQuality: boolean) => (withQuality ? 5 : 4);
 
-function normalize(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/ё/g, "е")
-    .replace(/[  ]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+/**
+ * Ответ предприятия одной строкой: «31500 200 8 1.5 46».
+ * Понимает «31 500» (разряды через пробел), «31,5 тыс», запятые и точки с запятой между числами.
+ */
+export function parseOffer(input: string, withQuality: boolean): OfferParse {
+  const text = input.toLowerCase().replace(/ё/g, "е").replace(/[   ]/g, " ").trim();
+  if (!text) return { ok: false, reason: "empty", numbers: [] };
 
-/** Цена и объём по ключевым словам: «цена 32500, объем 150», «32 500 руб 150 т» */
-function parseLabeled(text: string): { price?: number; volume?: number } {
-  const out: { price?: number; volume?: number } = {};
-  const priceAfter = new RegExp(String.raw`(?:цена|стоимость|price)\s*[:=-]?\s*(\d[\d .,]*?)(\s*(?:тыс\.?|к${NB}|k${NB}))?(?=\s*(?:руб|р|₽|,|;|$|\s[а-яa-z]))`).exec(text);
-  const priceBefore = new RegExp(String.raw`(\d[\d .,]*?)\s*(тыс\.?\s*)?(?:руб|р\.|р${NB}|₽|rub)`).exec(text);
-  const volAfter = new RegExp(String.raw`(?:объем|кол-во|количество|volume)\s*[:=-]?\s*(\d[\d .,]*\d|\d)`).exec(text);
-  const volBefore = new RegExp(String.raw`(\d[\d .,]*?)\s*(?:тонн[а-я]*|тн${NB}|т${NB}|t${NB})`).exec(text);
-
-  const pm = priceAfter ?? priceBefore;
-  if (pm) {
-    let v = toNumber(pm[1].trim().replace(/[.,]$/, ""));
-    if (pm[2]) v *= 1000;
-    if (Number.isFinite(v)) out.price = v;
-  }
-  const vm = volAfter ?? volBefore;
-  if (vm) {
-    const v = toNumber(vm[1].trim().replace(/[.,]$/, ""));
-    if (Number.isFinite(v)) out.volume = v;
-  }
-  return out;
-}
-
-export function parseSubmission(input: string): ParseResult {
-  const text = normalize(input);
-  if (!text) return { ok: false, reason: "empty" };
-
-  const labeled = parseLabeled(text);
-  if (labeled.price !== undefined && labeled.volume !== undefined) {
-    return { ok: true, price: labeled.price, volume: labeled.volume };
-  }
-
-  // Явные разделители: перенос строки, «;», «/», «|», запятая с пробелом
-  const segments = input
-    .split(/\n|;|\/|\||,\s/)
-    .map((s) => normalize(s))
-    .filter((s) => /\d/.test(s));
-  if (segments.length === 2) {
-    const nums = segments.map((s) => {
-      const re = new RegExp(NUM.source);
-      const m = re.exec(s);
-      return m ? readNumber(s, m) : NaN;
-    });
-    if (nums.every(Number.isFinite)) return { ok: true, price: nums[0], volume: nums[1] };
-  }
-
-  // Числа через пробел. Группы по 3 цифры трактуем как разряды: «32 500 150»
-  const groups = text.replace(/[^\d\s.,]/g, " ").trim().split(/\s+/).filter((g) => /\d/.test(g));
-  const withSuffix: number[] = [];
+  const tokens: { raw: string; value: number }[] = [];
   const re = new RegExp(NUM.source, "g");
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) withSuffix.push(readNumber(text, m));
+  while ((m = re.exec(text))) {
+    let value = Number(m[0].replace(",", "."));
+    if (tokens.length === 0 && THOUSAND_SUFFIX.test(text.slice(m.index + m[0].length))) value *= 1000;
+    tokens.push({ raw: m[0], value });
+  }
+  const expected = offerFields(withQuality);
+  const isInt = (raw: string, len?: number) => /^\d+$/.test(raw) && (len === undefined || raw.length === len);
 
-  if (groups.length === 0) return { ok: false, reason: "no_numbers" };
-  if (groups.length === 1) return { ok: false, reason: "one_number", numbers: [toNumber(groups[0])] };
-  if (groups.length === 2) {
-    // «32,5 тыс 150» — учитываем суффикс «тыс»
-    const nums = withSuffix.length === 2 ? withSuffix : groups.map(toNumber);
-    return { ok: true, price: nums[0], volume: nums[1] };
-  }
-  const isTriplet = (g: string) => /^\d{3}$/.test(g);
-  const isHead = (g: string) => /^\d{1,3}$/.test(g);
-  if (groups.length === 3) {
-    const [a, b, c] = groups;
-    if (isHead(a) && isTriplet(b)) return { ok: true, price: toNumber(a + b), volume: toNumber(c) };
-    if (isHead(b) && isTriplet(c)) return { ok: true, price: toNumber(a), volume: toNumber(b + c) };
-  }
-  if (groups.length === 4) {
-    const [a, b, c, d] = groups;
-    if (isHead(a) && isTriplet(b) && isHead(c) && isTriplet(d)) {
-      return { ok: true, price: toNumber(a + b), volume: toNumber(c + d) };
+  // Лишнее число — вероятно, разряды через пробел: «31 500 …» или объём «1 200»
+  for (const at of [0, 1]) {
+    if (tokens.length !== expected + 1) break;
+    const [a, b] = [tokens[at], tokens[at + 1]];
+    if (a && b && isInt(a.raw) && a.raw.length <= 3 && isInt(b.raw, 3)) {
+      tokens.splice(at, 2, { raw: a.raw + b.raw, value: Number(a.raw + b.raw) });
     }
   }
-  return { ok: false, reason: "too_many", numbers: groups.map(toNumber) };
+
+  const numbers = tokens.map((t) => t.value);
+  if (!tokens.length) return { ok: false, reason: "no_numbers", numbers };
+  if (tokens.length < expected) return { ok: false, reason: "missing", numbers };
+  if (tokens.length > expected) return { ok: false, reason: "too_many", numbers };
+  const [price, volume, moisture, impurity, quality] = numbers;
+  return { ok: true, price, volume, moisture, impurity, ...(withQuality ? { quality } : {}) };
+}
+
+/** Проверка показателей качества. Возвращает текст ошибки или null */
+export function checkQualityValues(
+  v: { moisture: number; impurity: number; quality?: number },
+  spec: { label: string; min: number; max: number } | null,
+  order: string
+): string | null {
+  const out = (label: string, x: number, min: number, max: number) =>
+    `${label} ${String(x).replace(".", ",")}% — вне диапазона ${min}–${max}%. Проверьте порядок чисел: ${order}.`;
+  if (!(v.moisture >= MOISTURE_RANGE.min && v.moisture <= MOISTURE_RANGE.max)) return out("Влажность", v.moisture, MOISTURE_RANGE.min, MOISTURE_RANGE.max);
+  if (!(v.impurity >= IMPURITY_RANGE.min && v.impurity <= IMPURITY_RANGE.max)) return out("Сорная примесь", v.impurity, IMPURITY_RANGE.min, IMPURITY_RANGE.max);
+  if (spec && v.quality !== undefined && !(v.quality >= spec.min && v.quality <= spec.max)) return out(spec.label, v.quality, spec.min, spec.max);
+  return null;
 }
 
 export type IssueCode =
@@ -249,18 +209,4 @@ export function checkQuote(price: number, volume: number, ctx: CheckContext = {}
   }
 
   return { level, issues, suggestion, moderation, reference: ctx.reference, deviation };
-}
-
-/** Проверка заявки покупателя с сайта: те же пороги, но ответ — одна понятная ошибка */
-export function checkBid(price: number, volume: number, reference?: number): string | null {
-  if (!Number.isFinite(price) || price <= 0) return "Укажите цену за тонну.";
-  if (price < 1000 && price * 1000 >= LIMITS.priceMin) return `Похоже, цена в тысячах. Имели в виду ${rub(price * 1000)} ₽/т?`;
-  if (price < LIMITS.priceMin || price > LIMITS.priceMax) return `Цена должна быть от ${rub(LIMITS.priceMin)} до ${rub(LIMITS.priceMax)} ₽/т.`;
-  if (!Number.isFinite(volume) || volume < LIMITS.volumeMin || volume > LIMITS.volumeMax) {
-    return `Объём должен быть от ${LIMITS.volumeMin} до ${rub(LIMITS.volumeMax)} т.`;
-  }
-  if (reference && Math.abs(price / reference - 1) > LIMITS.hard) {
-    return `Цена сильно отличается от рынка (средняя ${rub(reference)} ₽/т). Проверьте цифру.`;
-  }
-  return null;
 }

@@ -4,7 +4,7 @@
 import { Bot, InlineKeyboard, Keyboard, type Context } from "grammy";
 import { config } from "./config.ts";
 import { handle, senders, setAdminNotifier, type Incoming, type Outgoing } from "./core.ts";
-import { setMatchNotifier } from "./matching.ts";
+
 
 function markup(out: Outgoing) {
   if (out.requestContact) return new Keyboard().requestContact("📱 Отправить номер").resized().oneTime();
@@ -72,7 +72,7 @@ export function startTelegram() {
     const toAdmin = (text: string) =>
       void bot.api.sendMessage(config.adminChatId, text, { link_preview_options: { is_disabled: true } }).catch((e) => console.error(e.message));
     setAdminNotifier(toAdmin);
-    setMatchNotifier(toAdmin);
+
   }
 
   void bot.api.setMyCommands([

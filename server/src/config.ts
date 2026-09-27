@@ -15,7 +15,6 @@ export const config = {
   adminChatId: env("ADMIN_CHAT_ID"),
   maxToken: env("MAX_BOT_TOKEN"),
   maxUsername: env("MAX_BOT_USERNAME"),
-  reminderHour: Number(env("REMINDER_HOUR", "9")),
   /** Пароль панели управления /admin */
   adminPassword: env("ADMIN_PASSWORD"),
   /** Адрес сайта — для ссылок на анкету */
@@ -25,8 +24,4 @@ export const config = {
 /** Рабочий день считаем по Москве */
 export function mskDay(ms: number): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Moscow" }).format(ms);
-}
-
-export function mskHour(ms: number): number {
-  return Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Moscow", hour: "2-digit", hour12: false }).format(ms));
 }

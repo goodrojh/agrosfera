@@ -1,21 +1,21 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, BookOpen, Map as MapIcon, Minus, Plus, X } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, BookOpen, Map as MapIcon, Minus, Search, X } from "lucide-react";
 import { useMarket } from "@/components/market/MarketProvider";
-import PriceChart from "@/components/market/PriceChart";
+import PriceChart, { type ChartSeries } from "@/components/market/PriceChart";
 import RussiaMap from "@/components/market/RussiaMap";
-import RegionPicker from "@/components/market/RegionPicker";
-import OrderBook from "@/components/market/OrderBook";
-import BidDialog from "@/components/market/BidDialog";
-import DealDialog from "@/components/market/DealDialog";
+import RegionPicker, { plural } from "@/components/market/RegionPicker";
+import LeadDialog from "@/components/market/LeadDialog";
 import GuideDialog from "@/components/market/GuideDialog";
-import { CABINET_URL, useAccount, type Role } from "@/lib/account";
-import { computeIndex, dailySeries, inScope, intradaySeries, lastHistoryDay, type IndexStats, type Scope } from "@/lib/market/aggregate";
-import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
+import { computeIndex, dailySeries, inScope, intradaySeries, type IndexStats, type Scope } from "@/lib/market/aggregate";
+import { CROPS, CROP_BY_ID, type CropId, type QualitySpec } from "@/lib/market/crops";
 import { REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
-import { ago, pct, rub } from "@/lib/market/format";
+import { ago, pct, rub, time } from "@/lib/market/format";
 import type { DailyClose, Quote } from "@/lib/market/types";
+
+/** Событие «открыть общий запрос» — его шлёт кнопка «Оставить заявку» в шапке */
+export const REQUEST_EVENT = "agr-request";
 
 const PERIODS = [
   { id: "day", label: "День", days: 1 },
@@ -23,6 +23,10 @@ const PERIODS = [
   { id: "30", label: "Месяц", days: 30 },
   { id: "90", label: "3 мес", days: 90 },
 ] as const;
+
+/** Цвета линий регионов на графике; первая — фирменная */
+const COLORS = ["#1F5A25", "#d9822b", "#2f6fb0", "#9b4dca", "#c0392b"];
+const MAX_LINES = COLORS.length;
 
 function Change({ value }: { value: number | null }) {
   if (value === null || !Number.isFinite(value)) return <span className="text-gray-400">—</span>;
@@ -46,48 +50,154 @@ function LiveAgo({ since }: { since: number }) {
   return <>{since ? ago(since, now) : "—"}</>;
 }
 
-function ChartPanel({
-  today,
-  history,
-  latest,
-  scope,
-  nowTs,
-  minCount,
-}: {
-  today: Quote[];
-  history: DailyClose[];
-  latest: Map<string, Quote>;
-  scope: Scope;
-  nowTs: number;
-  minCount: number;
-}) {
+const startOfDay = (ms: number) => {
+  const d = new Date(ms);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+};
+
+/** «сегодня 08:14», «вчера 09:30», «2 дня назад» */
+function updatedLabel(at: number, now: number): { text: string; fresh: boolean } {
+  const today = startOfDay(now);
+  if (at >= today) return { text: `сегодня ${time(at)}`, fresh: true };
+  if (at >= today - 86_400_000) return { text: `вчера ${time(at)}`, fresh: false };
+  return { text: "2 дня назад", fresh: false };
+}
+
+const pctCell = (n?: number) => (n === undefined ? "—" : `${String(n).replace(".", ",")}%`);
+
+function ChartPanel({ recent, history, now, regions }: { recent: Quote[]; history: DailyClose[]; now: number; regions: RegionId[] }) {
   const [period, setPeriod] = useState<(typeof PERIODS)[number]["id"]>("day");
-  const series = useMemo(() => {
-    const p = PERIODS.find((x) => x.id === period)!;
-    return period === "day" ? intradaySeries(today, scope, minCount) : dailySeries(history, latest, scope, p.days, nowTs);
-  }, [period, today, history, latest, scope, nowTs, minCount]);
+  const lineRegions = regions.slice(0, MAX_LINES);
+
+  // Ряды пересчитывает React Compiler только при изменении входных данных
+  const days = PERIODS.find((x) => x.id === period)!.days;
+  const build = (scope: Scope, minCount: number) =>
+    period === "day" ? intradaySeries(recent, scope, startOfDay(now), now, minCount) : dailySeries(history, recent, scope, days, now, minCount);
+  const series: ChartSeries[] = !lineRegions.length
+    ? [{ id: "all", label: "Вся Россия", color: COLORS[0], points: build({ regions: [] }, 3) }]
+    : lineRegions.map((r, i) => ({ id: r, label: REGION_BY_ID[r].name, color: COLORS[i], points: build({ regions: [r] }, 1) }));
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-gray-400">Средняя цена продавцов, ₽/т</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+          <span className="text-gray-400">Средняя цена предложений, ₽/т</span>
+          {series.length > 1 &&
+            series.map((s) => (
+              <span key={s.id} className="inline-flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
+                {s.label}
+              </span>
+            ))}
+          {regions.length > MAX_LINES && <span className="text-gray-400">на графике — первые {MAX_LINES} регионов</span>}
+        </div>
         <div className="flex bg-gray-100 p-0.5 rounded-lg">
           {PERIODS.map((p) => (
             <button
               key={p.id}
               onClick={() => setPeriod(p.id)}
-              className={
-                "px-2.5 py-1 text-xs rounded-md whitespace-nowrap transition-colors " +
-                (period === p.id ? "bg-white text-gray-900 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-800")
-              }
+              className={"px-2.5 py-1 text-xs rounded-md whitespace-nowrap transition-colors " + (period === p.id ? "bg-white text-gray-900 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-800")}
             >
               {p.label}
             </button>
           ))}
         </div>
       </div>
-      <div className="h-[170px] md:h-[185px] mt-2">
-        <PriceChart points={series} kind={period === "day" ? "intraday" : "daily"} animKey={`${period}-${(scope.regions ?? []).join(",")}`} />
+      <div className="h-[200px] md:h-[230px] mt-2">
+        <PriceChart series={series} kind={period === "day" ? "intraday" : "daily"} animKey={`${period}-${lineRegions.join(",")}`} />
+      </div>
+    </div>
+  );
+}
+
+/** Сводка предложений партнёров: без названий предприятий */
+function OffersTable({ offers, quality, now, onLead }: { offers: Quote[]; quality: QualitySpec | null; now: number; onLead: (q: Quote) => void }) {
+  const [sort, setSort] = useState<"price" | "volume" | "fresh">("price");
+  const rows = useMemo(
+    () => [...offers].sort((a, b) => (sort === "price" ? a.price - b.price : sort === "volume" ? b.volume - a.volume : b.at - a.at)),
+    [offers, sort]
+  );
+  const sortBtn = (id: typeof sort, label: string) => (
+    <button onClick={() => setSort(id)} className={"px-2 py-1 rounded-md " + (sort === id ? "bg-white text-gray-900 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-800")}>
+      {label}
+    </button>
+  );
+
+  if (!rows.length) {
+    return <div className="py-10 text-center text-sm text-gray-500">По выбранным регионам сейчас нет предложений. Оставьте запрос — подберём объём у партнёров.</div>;
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <p className="text-sm font-semibold text-gray-900">Предложения партнёров</p>
+        <div className="flex bg-gray-100 p-0.5 rounded-lg text-xs">
+          {sortBtn("price", "Дешевле")}
+          {sortBtn("volume", "Больше объём")}
+          {sortBtn("fresh", "Свежие")}
+        </div>
+      </div>
+
+      {/* Компьютер: таблица */}
+      <table className="hidden md:table w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
+            <th className="font-normal py-2 pr-3">Регион</th>
+            <th className="font-normal py-2 px-3 text-right">Объём</th>
+            <th className="font-normal py-2 px-3 text-right">Влажность</th>
+            <th className="font-normal py-2 px-3 text-right">Сорная примесь</th>
+            {quality && <th className="font-normal py-2 px-3 text-right">{quality.label}</th>}
+            <th className="font-normal py-2 px-3 text-right">Цена, ₽/т</th>
+            <th className="font-normal py-2 px-3">Обновлено</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((q) => {
+            const u = updatedLabel(q.at, now);
+            return (
+              <tr key={q.id} className="border-b border-gray-50 hover:bg-[#f8faf6] transition-colors">
+                <td className="py-2.5 pr-3 text-gray-900">{REGION_BY_ID[q.regionId].name}</td>
+                <td className="py-2.5 px-3 text-right tabular-nums">{rub(q.volume)} т</td>
+                <td className="py-2.5 px-3 text-right tabular-nums text-gray-600">{pctCell(q.moisture)}</td>
+                <td className="py-2.5 px-3 text-right tabular-nums text-gray-600">{pctCell(q.impurity)}</td>
+                {quality && <td className="py-2.5 px-3 text-right tabular-nums text-gray-600">{pctCell(q.quality)}</td>}
+                <td className="py-2.5 px-3 text-right tabular-nums font-bold text-gray-900">{rub(q.price)}</td>
+                <td className={"py-2.5 px-3 text-xs whitespace-nowrap " + (u.fresh ? "text-[#2f7a1f]" : "text-gray-400")}>{u.text}</td>
+                <td className="py-2 pl-3 text-right">
+                  <button onClick={() => onLead(q)} className="rounded-lg bg-[#1F5A25] text-white px-3 py-1.5 text-xs font-semibold hover:bg-[#174a1c] whitespace-nowrap">
+                    Оставить заявку
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      {/* Телефон: карточки */}
+      <div className="md:hidden divide-y divide-gray-100">
+        {rows.map((q) => {
+          const u = updatedLabel(q.at, now);
+          return (
+            <div key={q.id} className="py-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-sm font-medium text-gray-900">{REGION_BY_ID[q.regionId].name}</p>
+                <p className="text-base font-bold tabular-nums">{rub(q.price)} ₽/т</p>
+              </div>
+              <p className="mt-0.5 text-xs text-gray-500 tabular-nums">
+                {rub(q.volume)} т · влажн. {pctCell(q.moisture)} · сорн. {pctCell(q.impurity)}
+                {quality ? ` · ${quality.short.toLowerCase()} ${pctCell(q.quality)}` : ""}
+              </p>
+              <div className="mt-2 flex items-center justify-between">
+                <span className={"text-xs " + (u.fresh ? "text-[#2f7a1f]" : "text-gray-400")}>{u.text}</span>
+                <button onClick={() => onLead(q)} className="rounded-lg bg-[#1F5A25] text-white px-3 py-1.5 text-xs font-semibold">
+                  Оставить заявку
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -167,78 +277,59 @@ function MapDialog({
   );
 }
 
-/** Суммарный объём строки стакана по цене */
-const volumeAt = (rows: { price: number; volume: number }[], price: number) => rows.filter((r) => r.price === price).reduce((s, r) => s + r.volume, 0);
-
-/**
- * Окно котировок.
- * На сайте — только просмотр (в демо-режиме кнопки работают для показа).
- * В личном кабинете — кнопки своей роли: предприятие продаёт, экспортёр и агент покупают.
- */
-export default function Terminal({ inCabinet = false, role = null, onOwnPrice }: { inCabinet?: boolean; role?: Role | null; onOwnPrice?: () => void }) {
-  const { ready, mode, crop, setCrop, supported, companies, today, history, latest, lastEventAt, bids } = useMarket();
+/** Сводка: график цен и предложения предприятий-партнёров с кнопкой заявки */
+export default function Terminal() {
+  const { ready, mode, crop, setCrop, recent, history, offers, now, lastEventAt } = useMarket();
   const [regions, setRegions] = useState<RegionId[]>([]);
   const [mapOpen, setMapOpen] = useState(false);
-  const [bidDraft, setBidDraft] = useState<{ price?: number; volume?: number } | null>(null);
   const closeMap = useCallback(() => setMapOpen(false), []);
-  const closeBid = useCallback(() => setBidDraft(null), []);
-  const [deal, setDeal] = useState<{ side: "buy" | "sell"; price: number; volume: number } | null>(null);
-  const closeDeal = useCallback(() => setDeal(null), []);
+  const [lead, setLead] = useState<{ offer?: Quote } | null>(null);
+  const closeLead = useCallback(() => setLead(null), []);
   const [guideOpen, setGuideOpen] = useState(false);
   const closeGuide = useCallback(() => setGuideOpen(false), []);
-  const { account } = useAccount();
-
-  // Что можно делать в этом окне
-  const showcase = !inCabinet && mode === "demo";
-  const canSell = showcase || (inCabinet && role === "producer");
-  const canBuy = showcase || (inCabinet && (role === "exporter" || role === "agent"));
-  const openDeal = (side: "buy" | "sell", price: number, volume: number) => setDeal({ side, price, volume });
-
-  const scope = useMemo<Scope>(() => ({ direction: "all", region: null, regions }), [regions]);
   const cropInfo = CROP_BY_ID[crop];
 
-  const prevCloses = useMemo(() => {
-    const d = lastHistoryDay(history);
-    return history.filter((h) => h.day === d);
-  }, [history]);
+  // Кнопка «Оставить заявку» в шапке и ссылка /?zayavka с других страниц
+  useEffect(() => {
+    const open = () => setLead({});
+    window.addEventListener(REQUEST_EVENT, open);
+    if (new URLSearchParams(window.location.search).has("zayavka")) {
+      document.getElementById("terminal")?.scrollIntoView();
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLead({});
+    }
+    return () => window.removeEventListener(REQUEST_EVENT, open);
+  }, []);
 
-  const live = useMemo(() => {
+  const scope = useMemo<Scope>(() => ({ regions }), [regions]);
+  const scoped = useMemo(() => offers.filter((q) => inScope(q.regionId, scope)), [offers, scope]);
+
+  const summary = useMemo(() => {
     if (!ready) return null;
-    const all = [...latest.values()];
-    const inS = all.filter((q) => inScope(q.regionId, scope));
-    const stats = computeIndex(inS);
-    const prevStats = computeIndex(prevCloses.filter((h) => inScope(h.regionId, scope)));
+    const stats = computeIndex(scoped);
+    const days = dailySeries(history, recent, scope, 2, now);
+    const prev = days.length >= 2 ? days[days.length - 2] : null;
     const regionStats = new Map<RegionId, IndexStats>();
     for (const r of REGIONS) {
-      const st = computeIndex(all.filter((q) => q.regionId === r.id));
+      const st = computeIndex(offers.filter((q) => q.regionId === r.id));
       if (st) regionStats.set(r.id, st);
     }
-    const total = companies.filter((c) => inScope(c.regionId, scope)).length;
-    return { inS, stats, change: stats && prevStats ? stats.index / prevStats.index - 1 : null, regionStats, total };
-  }, [ready, latest, prevCloses, companies, scope]);
-
-  // Заявки покупателей: без регионов — подходят любому выбору
-  const scopedBids = useMemo(
-    () => bids.filter((b) => !regions.length || !b.regions.length || b.regions.some((r) => regions.includes(r))),
-    [bids, regions]
-  );
+    return { stats, change: stats && prev ? stats.index / prev.index - 1 : null, volume: scoped.reduce((s, q) => s + q.volume, 0), regionStats };
+  }, [ready, scoped, history, recent, scope, offers, now]);
 
   const chooseCrop = (c: CropId) => {
     setCrop(c);
     setRegions((prev) => prev.filter((r) => CROP_BY_ID[c].regions.includes(r)));
   };
 
-  const s = live?.stats;
-  const bestAsk = live?.inS.length ? Math.min(...live.inS.map((q) => q.price)) : undefined;
-  const bestBid = scopedBids.length ? Math.max(...scopedBids.map((b) => b.price)) : undefined;
-  const minCount = regions.length ? 1 : Math.max(3, Math.round((live?.total ?? 0) * 0.35));
+  const s = summary?.stats;
 
   return (
-    <section id="terminal" className={inCabinet ? "" : "bg-white py-6 md:py-8 px-4 md:px-8 scroll-mt-0"}>
-      <div className={inCabinet ? "" : "max-w-7xl mx-auto"}>
-        <div className={"flex flex-wrap items-center justify-between gap-3 " + (inCabinet ? "mb-4" : "mb-5")}>
+    <section id="terminal" className="bg-white py-6 md:py-8 px-4 md:px-8 scroll-mt-0">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
           <div className="flex items-center gap-3">
-            {!inCabinet && <h2 className="text-[28px] md:text-[34px] font-semibold tracking-tight text-[#111] leading-none">Котировки</h2>}
+            <h2 className="text-[28px] md:text-[34px] font-semibold tracking-tight text-[#111] leading-none">Сводка предложений</h2>
             <button
               onClick={() => setGuideOpen(true)}
               className="inline-flex items-center gap-1.5 rounded-full border border-[#1F5A25]/25 bg-[#f3f8ee] px-3.5 py-1.5 text-sm font-semibold text-[#1F5A25] hover:bg-[#e6f0dc] transition-colors"
@@ -265,10 +356,7 @@ export default function Terminal({ inCabinet = false, role = null, onOwnPrice }:
                   key={c.id}
                   onClick={() => chooseCrop(c.id)}
                   aria-current={on}
-                  className={
-                    "shrink-0 text-left rounded-xl px-4 py-2.5 text-sm font-medium transition-colors " +
-                    (on ? "bg-[#1F5A25] text-white" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900")
-                  }
+                  className={"shrink-0 text-left rounded-xl px-4 py-2.5 text-sm font-medium transition-colors " + (on ? "bg-[#1F5A25] text-white" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900")}
                 >
                   {c.name}
                 </button>
@@ -276,119 +364,50 @@ export default function Terminal({ inCabinet = false, role = null, onOwnPrice }:
             })}
           </nav>
 
-          <div className="min-w-0">
-            {!supported ? (
-              <div className="rounded-2xl border border-dashed border-gray-300 p-10 text-center">
-                <p className="text-xl font-semibold text-gray-900">{cropInfo.name}: подключаем предприятия</p>
-                <p className="text-gray-500 mt-2 max-w-md mx-auto">Котировки появятся, как только предприятия начнут присылать цены в бот.</p>
+          <div className="min-w-0 rounded-2xl border border-[#e6ebe1] bg-white shadow-[0_1px_3px_rgba(16,40,20,0.05)]">
+            {/* Шапка окна: культура, средняя цена, объём, регионы */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-3.5 border-b border-gray-100">
+              <div>
+                <div className="flex items-baseline gap-3 flex-wrap">
+                  <p className="text-base font-semibold text-gray-900">{cropInfo.name}</p>
+                  <p className="text-2xl font-bold tabular-nums text-[#111]">{s ? `${rub(s.index)} ₽/т` : "—"}</p>
+                  <Change value={summary?.change ?? null} />
+                  <span className="text-xs text-gray-400">к вчера</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5 tabular-nums">
+                  {scoped.length} {plural(scoped.length, ["предложение", "предложения", "предложений"])} · свободно {rub(summary?.volume ?? 0)} т
+                </p>
               </div>
-            ) : (
-              <div className="rounded-2xl bg-white border border-[#e6ebe1] shadow-[0_1px_3px_rgba(16,40,20,0.05)]">
-                {/* Шапка окна: культура, цена, регион */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-3.5 border-b border-gray-100">
-                  <div className="flex items-baseline gap-3 flex-wrap">
-                    <p className="text-base font-semibold text-gray-900">{cropInfo.name}</p>
-                    <p className="text-2xl font-bold tabular-nums text-[#111]">{s ? `${rub(s.index)} ₽/т` : "—"}</p>
-                    <Change value={live?.change ?? null} />
-                    <span className="text-xs text-gray-400">к вчера</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <RegionPicker value={regions} onChange={setRegions} stats={live?.regionStats ?? new Map()} available={cropInfo.regions} />
-                    <button
-                      onClick={() => setMapOpen(true)}
-                      className="shrink-0 inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3.5 py-2.5 text-sm font-medium text-gray-700 hover:border-[#1F5A25]/40 hover:text-[#1F5A25] transition-colors"
-                    >
-                      <MapIcon size={16} />
-                      <span className="hidden sm:inline">На карте</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* График */}
-                <div className="px-5 pt-4">
-                  {live && <ChartPanel today={today} history={history} latest={latest} scope={scope} nowTs={lastEventAt} minCount={minCount} />}
-                </div>
-
-                {/* Стакан */}
-                <div className="px-2 md:px-5 pt-4 pb-4 mt-2 border-t border-gray-100">
-                  {live && (
-                    <OrderBook
-                      asks={live.inS}
-                      bids={scopedBids}
-                      onBuyAt={canBuy ? (price, volume) => openDeal("buy", price, volume) : undefined}
-                      onSellAt={canSell ? (price, volume) => openDeal("sell", price, volume) : undefined}
-                    />
-                  )}
-
-                  {/* Действия — только своей роли */}
-                  {canSell || canBuy ? (
-                    <>
-                      <div className={"mt-3 grid grid-cols-1 gap-2 md:gap-3 px-1 md:px-0 " + (showcase ? "md:grid-cols-[1fr_auto_1fr]" : "md:grid-cols-2")}>
-                        {canSell && (
-                          <button
-                            disabled={!bestBid}
-                            onClick={() => bestBid && openDeal("sell", bestBid, volumeAt(scopedBids, bestBid))}
-                            className="rounded-xl border border-[#2f7a1f]/30 px-4 py-2.5 text-sm font-semibold text-[#2f7a1f] hover:bg-[#f1f7ec] disabled:opacity-40 transition-colors"
-                          >
-                            {showcase ? "Предприятию: продать покупателю" : bestBid ? `Продать покупателю по ${rub(bestBid)} ₽/т` : "Покупателей пока нет"}
-                          </button>
-                        )}
-                        {canSell && !showcase && (
-                          <button
-                            onClick={onOwnPrice}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#1F5A25] text-white px-4 py-2.5 text-sm font-semibold hover:bg-[#174a1c] transition-colors"
-                          >
-                            <Plus size={16} /> Подать свою цену
-                          </button>
-                        )}
-                        {canBuy && (
-                          <button
-                            onClick={() => setBidDraft({})}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#1F5A25] text-white px-4 py-2.5 text-sm font-semibold hover:bg-[#174a1c] transition-colors md:order-none"
-                          >
-                            <Plus size={16} /> Поставить заявку в стакан
-                          </button>
-                        )}
-                        {canBuy && (
-                          <button
-                            disabled={!bestAsk}
-                            onClick={() => bestAsk && live && openDeal("buy", bestAsk, volumeAt(live.inS, bestAsk))}
-                            className="rounded-xl border border-[#c0492f]/30 px-4 py-2.5 text-sm font-semibold text-[#c0492f] hover:bg-[#fdf1ee] disabled:opacity-40 transition-colors"
-                          >
-                            {showcase ? "Экспортёру и агенту: купить у предприятия" : bestAsk ? `Купить у предприятия по ${rub(bestAsk)} ₽/т` : "Предложений пока нет"}
-                          </button>
-                        )}
-                      </div>
-                      <p className="mt-2 text-[11px] text-gray-400 text-center">
-                        {showcase
-                          ? "Демо: нажмите на любую цену в стакане. На рабочем сайте действия доступны в личном кабинете"
-                          : canSell
-                            ? "Нажмите на заявку покупателя слева, чтобы продать по её цене — сделку проведёт АгроСфера"
-                            : "Нажмите на цену предприятия справа, чтобы купить по ней — сделку проведёт АгроСфера"}
-                      </p>
-                    </>
-                  ) : inCabinet ? (
-                    <p className="mt-3 rounded-xl bg-[#fff8e6] px-4 py-3 text-sm text-gray-700 text-center">
-                      Кнопки покупки и продажи появятся, когда менеджер проверит компанию и откроет доступ.
-                    </p>
-                  ) : (
-                    <div className="mt-3 flex flex-col sm:flex-row items-center justify-center gap-3 rounded-xl bg-[#f6f8f3] px-4 py-3">
-                      <p className="text-sm text-gray-600 text-center">Покупать, продавать и ставить заявки можно в личном кабинете — после проверки компании.</p>
-                      <a href={CABINET_URL} className="shrink-0 rounded-xl bg-[#1F5A25] text-white px-4 py-2 text-sm font-semibold hover:bg-[#174a1c]">
-                        {account ? "Открыть кабинет" : "Войти или зарегистрироваться"}
-                      </a>
-                    </div>
-                  )}
-                </div>
+              <div className="flex items-center gap-2">
+                <RegionPicker value={regions} onChange={setRegions} stats={summary?.regionStats ?? new Map()} available={cropInfo.regions} />
+                <button
+                  onClick={() => setMapOpen(true)}
+                  className="shrink-0 inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3.5 py-2.5 text-sm font-medium text-gray-700 hover:border-[#1F5A25]/40 hover:text-[#1F5A25] transition-colors"
+                >
+                  <MapIcon size={16} />
+                  <span className="hidden sm:inline">На карте</span>
+                </button>
               </div>
-            )}
+            </div>
+
+            <div className="px-5 pt-4">{ready && <ChartPanel recent={recent} history={history} now={now} regions={regions} />}</div>
+
+            <div className="px-5 pt-5 pb-5 mt-3 border-t border-gray-100">
+              {ready && <OffersTable offers={scoped} quality={cropInfo.quality} now={now} onLead={(offer) => setLead({ offer })} />}
+              <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3 rounded-xl bg-[#f6f8f3] px-4 py-3">
+                <p className="text-sm text-gray-600 text-center sm:text-left">Не нашли нужного объёма или качества? Подберём у партнёров под ваш запрос.</p>
+                <button onClick={() => setLead({})} className="shrink-0 inline-flex items-center gap-2 rounded-xl border border-[#1F5A25]/30 bg-white px-4 py-2 text-sm font-semibold text-[#1F5A25] hover:bg-[#f3f8ee]">
+                  <Search size={15} /> Оставить запрос
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {mapOpen && live && (
+      {mapOpen && summary && (
         <MapDialog
-          stats={live.regionStats}
+          stats={summary.regionStats}
           initial={regions}
           onApply={(ids) => {
             setRegions(ids);
@@ -398,27 +417,7 @@ export default function Terminal({ inCabinet = false, role = null, onOwnPrice }:
         />
       )}
       {guideOpen && <GuideDialog onClose={closeGuide} />}
-      {deal && live && (
-        <DealDialog
-          side={deal.side}
-          price={deal.price}
-          volume={deal.volume}
-          cropName={cropInfo.name}
-          onClose={closeDeal}
-        />
-      )}
-      {bidDraft && live && (
-        <BidDialog
-          cropName={cropInfo.name}
-          initialPrice={bidDraft.price}
-          initialVolume={bidDraft.volume}
-          initialRegions={regions}
-          available={cropInfo.regions}
-          stats={live.regionStats}
-          bestAsk={live.stats?.min}
-          onClose={closeBid}
-        />
-      )}
+      {lead && <LeadDialog offer={lead.offer} crop={crop} regions={regions} onClose={closeLead} />}
     </section>
   );
 }

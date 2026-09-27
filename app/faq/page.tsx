@@ -5,16 +5,16 @@ import Footer from "@/components/site/Footer";
 
 export const metadata: Metadata = {
   title: "Вопросы и ответы — АгроСфера",
-  description: "Откуда берутся цены, как стать участником и как проходит сделка.",
+  description: "Откуда берутся предложения, как оставить заявку и как стать партнёром.",
 };
 
 export default function FaqPage() {
   return (
     <main className="min-h-screen bg-white">
       <SiteHeader active="faq" />
-      <PageIntro title="Вопросы и ответы" lead="Коротко о котировках, участии и сделках." />
+      <PageIntro title="Вопросы и ответы" lead="Коротко о сводке, заявках и партнёрстве." />
       <FAQ />
-      <Footer withForm={false} />
+      <Footer />
     </main>
   );
 }

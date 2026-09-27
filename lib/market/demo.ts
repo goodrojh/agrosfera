@@ -1,10 +1,11 @@
-// Демо-рынок: детерминированная история за 90 дней и поток подач «как из бота».
+// Демо-рынок: детерминированная история за 90 дней и поток ответов «как из бота».
 // Работает, пока к сайту не подключён сервер (NEXT_PUBLIC_API_URL).
 
 import { REGIONS, REGION_BY_ID, type RegionId } from "./regions";
-import { dayKey, latestAccepted, referencePrice } from "./aggregate";
+import { IMPURITY, MOISTURE, type QualitySpec } from "./crops";
+import { activeOffers, dayKey, referencePrice } from "./aggregate";
 import { checkQuote } from "./validate";
-import type { Bid, Company, DailyClose, MarketSnapshot, Quote } from "./types";
+import type { Company, DailyClose, MarketSnapshot, QualityValues, Quote } from "./types";
 
 export function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -21,12 +22,17 @@ interface DemoCompany extends Company {
   offset: number;
   capacity: number;
   reliability: number;
+  moisture: number;
+  impurity: number;
+  quality: number;
 }
 
 const HISTORY_DAYS = 90;
 const DAY = 86_400_000;
 const round50 = (n: number) => Math.round(n / 50) * 50;
 const round10 = (n: number) => Math.max(10, Math.round(n / 10) * 10);
+const round1 = (n: number) => Math.round(n * 10) / 10;
+const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 /** Общерыночный фактор: рост к августу, давление нового урожая в сентябре */
 function marketFactor(dayOffset: number): number {
@@ -36,10 +42,10 @@ function marketFactor(dayOffset: number): number {
 
 export interface DemoMarket {
   snapshot: MarketSnapshot;
+  /** Следующий ответ какого-нибудь предприятия */
   next(now: number, current: Quote[]): Quote;
-  /** Новая заявка покупателя (демо-поток спроса) */
-  nextBid(now: number, current: Quote[]): Bid;
-  submit(companyId: string, regionId: RegionId, price: number, volume: number, now: number, current: Quote[], moderation?: boolean): Quote;
+  /** Ответ из симулятора бота на сайте */
+  submit(companyId: string, regionId: RegionId, offer: { price: number; volume: number } & QualityValues, now: number, moderation?: boolean): Quote;
 }
 
 export interface DemoOptions {
@@ -48,19 +54,22 @@ export interface DemoOptions {
   regions?: RegionId[];
   /** Средняя цена культуры по России; региональные различия берутся из справочника регионов */
   basePrice?: number;
+  quality?: QualitySpec | null;
 }
 
 const FLAX_AVG = 31700;
 
 export function createDemoMarket(now: number, opts: DemoOptions = {}): DemoMarket {
   const rng = mulberry32(opts.seed ?? 20260925);
+  const spec = opts.quality ?? null;
   const regionList = opts.regions ? REGIONS.filter((r) => opts.regions!.includes(r.id)) : REGIONS;
   const regionPrice = (id: RegionId) =>
     opts.basePrice ? opts.basePrice * (1 + (REGION_BY_ID[id].basePrice / FLAX_AVG - 1) * 0.8) : REGION_BY_ID[id].basePrice;
+
   const companies: DemoCompany[] = [];
   let seq = 400;
   for (const r of regionList) {
-    const n = 3 + Math.floor(rng() * 4);
+    const n = 2 + Math.floor(rng() * 3);
     for (let i = 0; i < n; i++) {
       seq += 1 + Math.floor(rng() * 9);
       companies.push({
@@ -70,6 +79,9 @@ export function createDemoMarket(now: number, opts: DemoOptions = {}): DemoMarke
         offset: (rng() - 0.5) * 0.06,
         capacity: 80 + rng() * 1400,
         reliability: 0.72 + rng() * 0.25,
+        moisture: 6 + rng() * 5,
+        impurity: 0.5 + rng() * 2.5,
+        quality: spec ? spec.typical + (rng() - 0.5) * (spec.typical * 0.12) : 0,
       });
     }
   }
@@ -85,160 +97,93 @@ export function createDemoMarket(now: number, opts: DemoOptions = {}): DemoMarke
     }
     walk[r.id] = arr;
   }
-  const factor = (regionId: RegionId, d: number) =>
-    regionPrice(regionId) * marketFactor(d) * walk[regionId][d + HISTORY_DAYS - 1];
+  const factor = (regionId: RegionId, d: number) => regionPrice(regionId) * marketFactor(d) * walk[regionId][d + HISTORY_DAYS - 1];
+  const priceOf = (c: DemoCompany, d: number, r: () => number) => round50(factor(c.regionId, d) * (1 + c.offset) * (1 + (r() - 0.5) * 0.012));
+  const volumeOf = (c: DemoCompany, r: () => number) => round10(c.capacity * (0.35 + r() * 0.65));
+  const qualityOf = (c: DemoCompany, r: () => number): QualityValues => ({
+    moisture: round1(clamp(c.moisture + (r() - 0.5) * 0.6, MOISTURE.min, MOISTURE.max)),
+    impurity: round1(clamp(c.impurity + (r() - 0.5) * 0.4, IMPURITY.min, IMPURITY.max)),
+    ...(spec ? { quality: round1(clamp(c.quality + (r() - 0.5) * 0.4, spec.min, spec.max)) } : {}),
+  });
 
-  const history: DailyClose[] = [];
-  for (let d = -(HISTORY_DAYS - 1); d < 0; d++) {
-    const key = dayKey(now + d * DAY);
-    const weekday = new Date(now + d * DAY).getDay();
-    for (const c of companies) {
-      const p = weekday === 0 ? c.reliability * 0.4 : c.reliability;
-      if (rng() > p) continue;
-      history.push({
-        day: key,
-        companyId: c.id,
-        regionId: c.regionId,
-        price: round50(factor(c.regionId, d) * (1 + c.offset) * (1 + (rng() - 0.5) * 0.012)),
-        volume: round10(c.capacity * (0.35 + rng() * 0.65)),
-      });
-    }
-  }
-
-  // Сегодня: подачи с 07:00 (или за последние 2 часа, если открыли рано утром)
   let qid = 0;
   const makeId = () => `q${Date.now().toString(36)}${(qid++).toString(36)}`;
-  const d0 = new Date(now);
-  const seven = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate(), 7, 0, 0).getTime();
-  const start = now - seven > 2 * 3600_000 ? seven : now - 2 * 3600_000;
+  /** Утро дня d: ответы приходят с 8 до 11 */
+  const morning = (d: number, r: () => number) => {
+    const base = new Date(now + d * DAY);
+    return new Date(base.getFullYear(), base.getMonth(), base.getDate(), 8, 0, 0).getTime() + r() * 3 * 3600_000;
+  };
+
+  // История: дневные закрытия, и те же цены за последние дни — ответами с качеством
+  const history: DailyClose[] = [];
+  const recent: Quote[] = [];
+  for (let d = -(HISTORY_DAYS - 1); d < 0; d++) {
+    const key = dayKey(now + d * DAY);
+    for (const c of companies) {
+      if (rng() > c.reliability * 0.85) continue;
+      const price = priceOf(c, d, rng);
+      const volume = volumeOf(c, rng);
+      history.push({ day: key, companyId: c.id, regionId: c.regionId, price, volume });
+      if (d >= -3) {
+        recent.push({ id: makeId(), companyId: c.id, regionId: c.regionId, price, volume, at: morning(d, rng), status: "accepted", revision: 1, ...qualityOf(c, rng) });
+      }
+    }
+  }
+
+  // Сегодня: ответы с 8:00 (или за последние 2 часа, если открыли рано)
+  const eight = morning(0, () => 0);
+  const start = now - eight > 2 * 3600_000 ? eight : now - 2 * 3600_000;
   const span = Math.max(60_000, now - start - 60_000);
-
-  const today: Quote[] = [];
-  const todayCompanies = companies.filter(() => rng() < 0.78);
-  for (const c of todayCompanies) {
+  for (const c of companies) {
+    if (rng() > 0.7) continue;
     const at = start + rng() * span;
-    const price = round50(factor(c.regionId, 0) * (1 + c.offset) * (1 + (rng() - 0.5) * 0.012));
-    const volume = round10(c.capacity * (0.35 + rng() * 0.65));
-    today.push({ id: makeId(), companyId: c.id, regionId: c.regionId, price, volume, at, status: "accepted", revision: 1 });
-    if (rng() < 0.22) {
-      const at2 = at + rng() * (now - at);
-      const p2 = round50(price * (1 + (rng() - 0.55) * 0.02));
-      today.push({
-        id: makeId(), companyId: c.id, regionId: c.regionId, price: p2,
-        volume: round10(volume * (0.7 + rng() * 0.4)), at: at2, status: "accepted", revision: 2, prevPrice: price,
-      });
+    if (rng() < 0.05) {
+      recent.push({ id: makeId(), companyId: c.id, regionId: c.regionId, price: 0, volume: 0, at, status: "withdrawn", revision: 1 });
+      continue;
     }
+    recent.push({ id: makeId(), companyId: c.id, regionId: c.regionId, price: priceOf(c, 0, rng), volume: volumeOf(c, rng), at, status: "accepted", revision: 1, ...qualityOf(c, rng) });
   }
-  // Пара ошибок ввода, которые система не пустила в расчёт
-  for (let i = 0; i < 3 && todayCompanies.length > 5; i++) {
-    const c = todayCompanies[Math.floor(rng() * todayCompanies.length)];
-    const real = round50(factor(c.regionId, 0) * (1 + c.offset));
-    const typo = i === 1 ? real * 10 : Math.round(real / 1000);
-    today.push({
-      id: makeId(), companyId: c.id, regionId: c.regionId, price: typo, volume: round10(c.capacity * 0.5),
-      at: start + rng() * span, status: "rejected", revision: 0,
-      note: i === 1 ? `Лишний ноль → запрошено подтверждение ${real.toLocaleString("ru-RU")} ₽/т` : `Цена в тысячах → запрошено подтверждение ${(typo * 1000).toLocaleString("ru-RU")} ₽/т`,
-    });
-  }
-  today.sort((a, b) => a.at - b.at);
+  recent.sort((a, b) => a.at - b.at);
 
-  const pendingFix: { companyId: string; price: number; volume: number; due: number }[] = [];
-  const byId = new Map(companies.map((c) => [c.id, c]));
-
-  function build(c: Company, price: number, volume: number, at: number, current: Quote[]): Quote {
-    const latest = latestAccepted(current);
-    const prev = latest.get(c.id);
-    const check = checkQuote(price, volume, {
-      reference: referencePrice(latest, c.regionId, c.id),
-      previous: prev?.price,
-    });
-    const revision = current.filter((q) => q.companyId === c.id && q.status === "accepted").length + 1;
-    if (check.level === "reject" || check.suggestion) {
-      return {
-        id: makeId(), companyId: c.id, regionId: c.regionId, price, volume, at, status: "rejected", revision: 0,
-        note: check.issues[0]?.message,
-      };
-    }
+  function build(c: DemoCompany, price: number, volume: number, at: number, current: Quote[]): Quote {
+    const offers = activeOffers(current, at);
+    const prev = offers.find((q) => q.companyId === c.id);
+    const check = checkQuote(price, volume, { reference: referencePrice(offers, c.regionId, c.id), previous: prev?.price });
     return {
       id: makeId(), companyId: c.id, regionId: c.regionId, price, volume, at,
-      status: check.moderation ? "moderation" : "accepted",
-      revision, prevPrice: prev?.price,
-      note: check.moderation ? "Отклонение от медианы — ручная проверка" : undefined,
+      status: check.level === "reject" ? "rejected" : check.moderation ? "moderation" : "accepted",
+      revision: (prev?.revision ?? 0) + 1, prevPrice: prev?.price, ...qualityOf(c, Math.random),
     };
   }
 
   function next(at: number, current: Quote[]): Quote {
-    const fixIdx = pendingFix.findIndex((f) => f.due <= at);
-    if (fixIdx >= 0) {
-      const f = pendingFix.splice(fixIdx, 1)[0];
-      return build(byId.get(f.companyId)!, f.price, f.volume, at, current);
+    const offers = new Map(activeOffers(current, at).map((q) => [q.companyId, q]));
+    const c = companies[Math.floor(Math.random() * companies.length)];
+    const prev = offers.get(c.id);
+    if (prev && Math.random() < 0.04) {
+      return { id: makeId(), companyId: c.id, regionId: c.regionId, price: 0, volume: 0, at, status: "withdrawn", revision: prev.revision + 1 };
     }
-    const latest = latestAccepted(current);
-    const submitted = companies.filter((c) => latest.has(c.id));
-    const silent = companies.filter((c) => !latest.has(c.id));
-    const r = Math.random();
-    const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
-
-    if (r < 0.08 && submitted.length) {
-      const c = pick(submitted);
-      const real = latest.get(c.id)!.price;
-      const typo = Math.round(real / 1000);
-      pendingFix.push({ companyId: c.id, price: round50(real * (1 + (Math.random() - 0.5) * 0.01)), volume: latest.get(c.id)!.volume, due: at + 4000 });
-      return build(c, typo, latest.get(c.id)!.volume, at, current);
-    }
-    if ((r < 0.32 && silent.length) || submitted.length === 0) {
-      const c = pick(silent.length ? silent : companies);
-      const price = round50(factor(c.regionId, 0) * (1 + c.offset) * (1 + (Math.random() - 0.5) * 0.012));
-      return build(c, price, round10(c.capacity * (0.35 + Math.random() * 0.65)), at, current);
-    }
-    const c = pick(submitted);
-    const prev = latest.get(c.id)!;
-    const drift = (Math.random() - 0.52) * 0.018;
-    const volume = Math.random() < 0.5 ? round10(prev.volume * (0.75 + Math.random() * 0.2)) : round10(prev.volume * (0.9 + Math.random() * 0.3));
-    return build(c, round50(prev.price * (1 + drift)), volume, at, current);
+    const price = prev ? round50(prev.price * (1 + (Math.random() - 0.52) * 0.018)) : priceOf(c, 0, Math.random);
+    const volume = prev ? round10(prev.volume * (0.8 + Math.random() * 0.35)) : volumeOf(c, Math.random);
+    return build(c, price, volume, at, current);
   }
 
-  function submit(companyId: string, regionId: RegionId, price: number, volume: number, at: number, current: Quote[], moderation = false): Quote {
-    const prev = latestAccepted(current).get(companyId);
-    const revision = current.filter((q) => q.companyId === companyId && q.status === "accepted").length + 1;
+  function submit(companyId: string, regionId: RegionId, offer: { price: number; volume: number } & QualityValues, at: number, moderation = false): Quote {
     return {
-      id: makeId(), companyId, regionId, price, volume, at, revision, prevPrice: prev?.price,
+      id: makeId(), companyId, regionId, at, revision: 1, ...offer,
       status: moderation ? "moderation" : "accepted",
       note: moderation ? "Отклонение от медианы — ручная проверка" : undefined,
     };
   }
 
-  // Спрос: покупатели обычно предлагают чуть ниже цен производителей
-  const bidRng = mulberry32((opts.seed ?? 20260925) + 17);
-  let bidSeq = 0;
-  function makeBid(at: number, current: Quote[], rand: () => number): Bid {
-    const asks = [...latestAccepted(current).values()].map((q) => q.price).sort((a, b) => a - b);
-    const lowAsk = asks[0] ?? regionPrice(regionList[0].id) * 0.95;
-    // Покупатели ставят ниже лучшей цены продавца: чаще рядом, реже — заметно ниже
-    const price = round50(lowAsk - 100 - Math.pow(rand(), 1.4) * lowAsk * 0.06);
-    const pick = regionList.filter(() => rand() < 0.25).slice(0, 3).map((r) => r.id);
-    return {
-      id: `b${(bidSeq++).toString(36)}${at.toString(36)}`,
-      price,
-      volume: Math.round((200 + rand() * 2800) / 50) * 50,
-      regions: rand() < 0.5 ? [] : pick,
-      buyer: rand() < 0.6 ? "exporter" : "agent",
-      at,
-      status: "active",
-    };
-  }
-  const bids: Bid[] = Array.from({ length: 11 }, (_, i) => makeBid(start + ((i + 1) / 12) * span, today, bidRng));
-
   return {
     snapshot: {
       companies: companies.map(({ id, code, regionId }) => ({ id, code, regionId })),
-      today,
+      recent,
       history,
-      bids,
       serverTime: now,
     },
     next,
-    nextBid: (at, current) => makeBid(at, current, Math.random),
     submit,
   };
 }

@@ -1,23 +1,25 @@
-// HTTP API: публичная часть для сайта (снимок рынка, поток SSE), личный кабинет (cabinet.ts)
+// HTTP API: публичная часть для сайта (сводка, поток SSE, заявки экспортёров, анкета партнёра)
 // и закрытая паролем часть для панели управления (/admin).
 
 import { createServer, type IncomingMessage } from "node:http";
 import { readFileSync } from "node:fs";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { config, mskDay } from "./config.ts";
-import { bids, companies, leads, matches, members, quotes, sessions, type CompanyStatus, type MatchStatus, type Role } from "./db.ts";
-import { beginRound, bus, moderate, publishBid, senders } from "./core.ts";
-import { scanCrop } from "./matching.ts";
-import { handleCabinet } from "./cabinet.ts";
-import { hashPassword, isEmail, tempPassword } from "./auth.ts";
-import { bearer, clip, json, readJson } from "./http.ts";
-import { REGIONS, isRegionId } from "../../lib/market/regions.ts";
+import { companies, leads, members, quotes, type CompanyStatus, type LeadStatus } from "./db.ts";
+import { beginRound, bus, moderate, notifyAdmin, senders } from "./core.ts";
+import { allow, bearer, clientIp, clip, json, readJson } from "./http.ts";
+import { OFFER_TTL } from "../../lib/market/aggregate.ts";
+import { describe } from "../../lib/market/dialog.ts";
+import { isValidInn } from "../../lib/market/inn.ts";
+import { REGIONS, REGION_BY_ID, isRegionId, localSince } from "../../lib/market/regions.ts";
 import { CROPS, CROP_BY_ID, type CropId } from "../../lib/market/crops.ts";
-import type { Bid, Company, Quote } from "../../lib/market/types.ts";
+import type { Company, Quote } from "../../lib/market/types.ts";
 
 const isCrop = (v: unknown): v is CropId => typeof v === "string" && v in CROP_BY_ID;
-const isRole = (v: unknown): v is Role => v === "producer" || v === "exporter" || v === "agent";
 const rub = (n: number) => Math.round(n).toLocaleString("ru-RU");
+const phoneOk = (p: string) => p.replace(/\D/g, "").length >= 10;
+/** Сводка за 3 дня + ещё сутки — чтобы график за день начинался с полуночи */
+const RECENT = OFFER_TTL + 24 * 3600_000;
 
 // ── Панель управления: вход по паролю, токен живёт 12 часов ──────────────────
 const adminSessions = new Map<string, number>();
@@ -44,18 +46,18 @@ function adminAuthorized(req: IncomingMessage): boolean {
 const inviteLink = (code: string) => (config.telegramUsername ? `https://t.me/${config.telegramUsername}?start=${code}` : null);
 
 function adminOverview() {
-  const list = companies.list();
+  const now = Date.now();
+  const list = companies.list().filter((c) => c.role === "producer");
   const byId = new Map(list.map((c) => [c.id, c]));
-  const brief = (id: string | null) => {
-    const c = id ? byId.get(id) : undefined;
-    return c ? { id: c.id, name: c.name, code: c.code, role: c.role, person: c.person, phone: c.phone, email: c.email, botConnected: members.ofCompany(c.id).length > 0 } : null;
-  };
+  const last = quotes.lastAnswers();
   return {
-    companies: list.map((c) => ({ ...c, inviteLink: inviteLink(c.inviteCode), members: members.ofCompany(c.id) })),
-    bids: bids.forAdmin(),
-    matches: matches.list().map((m) => ({ ...m, seller: brief(m.sellerCompanyId), buyer: brief(m.buyerCompanyId) })),
+    companies: list.map((c) => {
+      const tz = REGION_BY_ID[c.regionId]?.tz ?? "Europe/Moscow";
+      const at = last.get(c.id) ?? null;
+      return { ...c, inviteLink: inviteLink(c.inviteCode), members: members.ofCompany(c.id), lastAnswer: at, answeredToday: !!at && at >= localSince(now, tz, 0) };
+    }),
     moderation: quotes.byStatus("moderation").map((q) => ({ ...q, companyName: byId.get(q.companyId)?.name ?? q.companyId })),
-    leads: leads.recent(),
+    leads: leads.recent().map((l) => ({ ...l, seller: l.sellerId ? (byId.get(l.sellerId) ? { name: byId.get(l.sellerId)!.name, code: byId.get(l.sellerId)!.code, phone: byId.get(l.sellerId)!.phone, person: byId.get(l.sellerId)!.person } : null) : null })),
     bot: config.telegramUsername ? `@${config.telegramUsername}` : null,
     regions: REGIONS.map((r) => ({ id: r.id, name: r.name })),
     crops: CROPS.map((c) => ({ id: c.id, name: c.name })),
@@ -77,6 +79,7 @@ export function startApi() {
     }
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname.replace(/\/$/, "") || "/";
+    const ip = clientIp(req);
 
     try {
       if (req.method === "GET" && (path === "/admin" || path === "/")) {
@@ -87,17 +90,16 @@ export function startApi() {
 
       if (req.method === "GET" && path === "/api/health") return json(res, 200, { ok: true, time: Date.now() });
 
-      // ── Публичные данные для сайта ──
+      // ── Сводка для сайта: предприятия без названий, ответы за последние дни, дневные закрытия ──
       if (req.method === "GET" && path === "/api/snapshot") {
         const crop = isCrop(url.searchParams.get("crop")) ? (url.searchParams.get("crop") as CropId) : "flax";
-        const today = mskDay(Date.now());
+        const now = Date.now();
         return json(res, 200, {
           crop,
           companies: companies.publicList(crop),
-          today: quotes.ofDay(today, crop),
-          history: quotes.history(today, crop),
-          bids: bids.active(crop),
-          serverTime: Date.now(),
+          recent: quotes.since(now - RECENT, crop).filter((q) => q.status !== "moderation"),
+          history: quotes.history(mskDay(now), crop),
+          serverTime: now,
         });
       }
 
@@ -109,32 +111,83 @@ export function startApi() {
           "X-Accel-Buffering": "no",
         });
         res.write("retry: 5000\n\n");
-        let day = mskDay(Date.now());
-        const onQuote = (q: Quote) => res.write(`event: quote\ndata: ${JSON.stringify(q)}\n\n`);
+        // Цены на проверке наружу не отдаём
+        const onQuote = (q: Quote) => q.status !== "moderation" && res.write(`event: quote\ndata: ${JSON.stringify(q)}\n\n`);
         const onCompany = (c: Company) => res.write(`event: company\ndata: ${JSON.stringify(c)}\n\n`);
-        const onBid = (b: Bid) => res.write(`event: bid\ndata: ${JSON.stringify(b)}\n\n`);
         bus.on("quote", onQuote);
         bus.on("company", onCompany);
-        bus.on("bid", onBid);
-        const ping = setInterval(() => {
-          res.write(": ping\n\n");
-          const d = mskDay(Date.now());
-          if (d !== day) {
-            day = d;
-            res.write("event: reset\ndata: {}\n\n");
-          }
-        }, 25_000);
+        const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
         req.on("close", () => {
           clearInterval(ping);
           bus.off("quote", onQuote);
           bus.off("company", onCompany);
-          bus.off("bid", onBid);
         });
         return;
       }
 
-      // ── Личный кабинет ──
-      if (await handleCabinet(req, res, path)) return;
+      // ── Заявка экспортёра или агента: на предложение из сводки или общий запрос ──
+      if (req.method === "POST" && path === "/api/leads") {
+        if (!allow(`lead:${ip}`, 8)) return json(res, 429, { error: "Слишком много заявок подряд — попробуйте через 10 минут" });
+        const b = await readJson(req);
+        const name = clip(b.name, 120);
+        const phone = clip(b.phone, 40);
+        if (name.length < 2) return json(res, 400, { error: "Укажите имя" });
+        if (!phoneOk(phone)) return json(res, 400, { error: "Укажите телефон для связи" });
+        const crop = isCrop(b.crop) ? b.crop : null;
+        const volume = Math.round(Number(b.volume)) || null;
+        const common = { name, phone, company: clip(b.company, 160), comment: clip(b.comment, 1000), volume, crop };
+
+        if (typeof b.offerId === "string" && b.offerId) {
+          const q = quotes.get(b.offerId);
+          if (!q || q.status !== "accepted") return json(res, 400, { error: "Предложение уже обновилось — обновите страницу" });
+          const c = CROP_BY_ID[q.crop ?? "flax"];
+          const offer = `${REGION_BY_ID[q.regionId].name} · ${describe({ ...q, moisture: q.moisture ?? 0, impurity: q.impurity ?? 0 }, c.quality)}`;
+          const lead = leads.insert({ ...common, kind: "offer", crop: q.crop ?? "flax", target: REGION_BY_ID[q.regionId].name, price: q.price, offer, sellerId: q.companyId });
+          const seller = companies.get(q.companyId);
+          notifyAdmin(
+            `🟢 Заявка на предложение №${lead.id}\n${c.name}: ${offer}\nПредприятие: ${seller?.name ?? "—"} (${seller?.code ?? ""})\n` +
+              `Покупатель: ${name}${common.company ? `, ${common.company}` : ""}, ${phone}${volume ? `\nНужно: ${rub(volume)} т` : ""}${common.comment ? `\n${common.comment}` : ""}`
+          );
+          return json(res, 200, { ok: true });
+        }
+
+        const regions = Array.isArray(b.regions) ? b.regions.filter((r: unknown) => typeof r === "string" && isRegionId(r)) : [];
+        const price = Math.round(Number(b.price)) || null;
+        const target = regions.length ? regions.map((r: string) => REGION_BY_ID[r as keyof typeof REGION_BY_ID].name).join(", ") : "любые регионы";
+        const lead = leads.insert({ ...common, kind: "request", target, price, offer: "", sellerId: null });
+        notifyAdmin(
+          `📋 Запрос №${lead.id}: ${crop ? CROP_BY_ID[crop].name : "культура не указана"} · ${target}${volume ? ` · ${rub(volume)} т` : ""}${price ? ` · до ${rub(price)} ₽/т` : ""}\n` +
+            `${name}${common.company ? `, ${common.company}` : ""}, ${phone}${common.comment ? `\n${common.comment}` : ""}`
+        );
+        return json(res, 200, { ok: true });
+      }
+
+      // ── Анкета предприятия «Стать партнёром» ──
+      if (req.method === "POST" && path === "/api/apply") {
+        if (!allow(`apply:${ip}`, 5)) return json(res, 429, { error: "Слишком много анкет подряд — попробуйте позже" });
+        const b = await readJson(req);
+        const name = clip(b.name, 160);
+        const inn = clip(b.inn, 20).replace(/\D/g, "");
+        const regionId = String(b.regionId ?? "");
+        const person = clip(b.person, 160);
+        const phone = clip(b.phone, 40);
+        const crops = Array.isArray(b.crops) ? (b.crops.filter(isCrop) as CropId[]) : [];
+        const comment = clip(b.comment, 1000);
+        if (name.length < 2) return json(res, 400, { error: "Укажите название предприятия" });
+        if (inn && inn.length !== 10 && inn.length !== 12) return json(res, 400, { error: "ИНН — 10 или 12 цифр. Если ИНН нет, оставьте поле пустым" });
+        if (!isRegionId(regionId)) return json(res, 400, { error: "Выберите регион" });
+        if (person.length < 2) return json(res, 400, { error: "Укажите контактное лицо" });
+        if (!phoneOk(phone)) return json(res, 400, { error: "Укажите телефон — по нему бот узнает вас после проверки" });
+        if (!crops.length) return json(res, 400, { error: "Отметьте культуры, которые продаёте" });
+        const stamp = new Date().toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
+        const innNote = !inn ? "⚠️ ИНН не указан — уточнить при звонке." : !isValidInn(inn) ? "⚠️ ИНН не прошёл проверку контрольной суммы — проверить вручную." : "";
+        companies.create({
+          name, inn: inn || undefined, regionId, status: "new", crops, person, phone, source: "site",
+          notes: [innNote, comment ? `[${stamp}] Из анкеты: ${comment}` : ""].filter(Boolean).join("\n"),
+        });
+        notifyAdmin(`🆕 Анкета предприятия: ${name}, ${REGION_BY_ID[regionId].name}. ${person}, ${phone}. Культуры: ${crops.map((c) => CROP_BY_ID[c].name).join(", ")}. Панель → «Анкеты».`);
+        return json(res, 200, { ok: true });
+      }
 
       // ── Панель управления ──
       if (req.method === "POST" && path === "/api/admin/login") {
@@ -154,11 +207,7 @@ export function startApi() {
           const b = await readJson(req);
           const regionId = String(b.regionId ?? "");
           if (clip(b.name, 160).length < 2 || !isRegionId(regionId)) return json(res, 400, { error: "Укажите название и регион" });
-          const email = clip(b.email, 120).toLowerCase();
-          if (email && (!isEmail(email) || companies.byEmail(email))) return json(res, 400, { error: "Email неверный или уже занят" });
           const c = companies.create({
-            role: isRole(b.role) ? b.role : "producer",
-            email: email || undefined,
             name: clip(b.name, 160),
             inn: clip(b.inn, 12) || undefined,
             regionId,
@@ -171,7 +220,7 @@ export function startApi() {
           return json(res, 200, { ok: true, id: c.id });
         }
 
-        const m = path.match(/^\/api\/admin\/(companies|bids|quotes|matches)\/([^/]+)(?:\/(\w+))?$/);
+        const m = path.match(/^\/api\/admin\/(companies|quotes|leads)\/([^/]+)(?:\/(\w+))?$/);
         if (m) {
           const [, kind, id, action] = m;
 
@@ -191,26 +240,15 @@ export function startApi() {
               phone: typeof b.phone === "string" ? clip(b.phone, 40) : undefined,
               inn: typeof b.inn === "string" ? clip(b.inn, 12) : undefined,
             })!;
-            if (status === "blocked") sessions.removeAll(id);
             // Доступ только что открыли, а бот уже подключён — сразу сообщаем
             if (!before.active && after.active) {
               for (const mb of members.ofCompany(id)) {
                 await senders[mb.channel]?.(mb.userId, {
-                  text: `✅ Доступ открыт. Культуры: ${after.crops.map((c) => CROP_BY_ID[c].name).join(", ") || "не закреплены"}.`,
+                  text: `✅ Доступ открыт. Культуры: ${after.crops.map((c) => CROP_BY_ID[c].name).join(", ") || "не закреплены"}. Каждое утро в 8:00 по вашему времени бот попросит предложение.`,
                 });
               }
             }
             return json(res, 200, { ok: true });
-          }
-
-          // Сброс пароля: менеджер передаёт временный пароль участнику
-          if (kind === "companies" && action === "password" && req.method === "POST") {
-            const c = companies.get(id);
-            if (!c) return json(res, 404, { error: "Не найдено" });
-            const pwd = tempPassword();
-            companies.setPassword(id, hashPassword(pwd));
-            sessions.removeAll(id);
-            return json(res, 200, { ok: true, password: pwd });
           }
 
           if (kind === "companies" && action === "ask" && req.method === "POST") {
@@ -218,17 +256,9 @@ export function startApi() {
             if (!c || !c.active) return json(res, 400, { error: "Сначала откройте доступ" });
             const list = members.ofCompany(id);
             for (const mb of list) {
-              for (const out of beginRound(mb.channel, mb.userId, c)) await senders[mb.channel]?.(mb.userId, out);
+              for (const out of beginRound(mb.channel, mb.userId, c, "morning")) await senders[mb.channel]?.(mb.userId, out);
             }
             return json(res, 200, { ok: true, sent: list.length });
-          }
-
-          if (kind === "bids" && req.method === "POST" && (action === "approve" || action === "reject")) {
-            const b = action === "approve" ? bids.approve(id) : bids.remove(id);
-            if (b) publishBid(b);
-            // Заявку поставили в стакан — сразу проверяем, нет ли предприятий дешевле
-            const found = b && action === "approve" ? scanCrop(b.crop ?? "flax").length : 0;
-            return json(res, 200, { ok: !!b, matches: found });
           }
 
           if (kind === "quotes" && req.method === "POST" && (action === "approve" || action === "reject")) {
@@ -236,25 +266,11 @@ export function startApi() {
             return json(res, 200, { ok: !!q });
           }
 
-          if (kind === "matches" && req.method === "PATCH") {
+          if (kind === "leads" && req.method === "PATCH") {
             const b = await readJson(req);
-            const status = ["new", "working", "done", "rejected"].includes(String(b.status)) ? (b.status as MatchStatus) : undefined;
-            const upd = matches.update(id, { status, note: typeof b.note === "string" ? clip(b.note, 2000) : undefined });
+            const status = ["new", "working", "done", "rejected"].includes(String(b.status)) ? (b.status as LeadStatus) : undefined;
+            const upd = leads.update(Number(id), { status, note: typeof b.note === "string" ? clip(b.note, 2000) : undefined });
             return json(res, upd ? 200 : 404, { ok: !!upd });
-          }
-
-          // Сообщить сторонам: предприятию — в бот (если подключён), обеим — в личный кабинет
-          if (kind === "matches" && action === "notify" && req.method === "POST") {
-            const mt = matches.get(id);
-            if (!mt) return json(res, 404, { error: "Не найдено" });
-            matches.update(id, { notified: true, status: mt.status === "new" ? "working" : mt.status });
-            const text = `🤝 Есть покупатель по вашей цене: ${CROP_BY_ID[mt.crop].name} — ${rub(mt.bidPrice)} ₽/т, до ${rub(mt.bidVolume)} т. Менеджер АгроСферы свяжется с вами, чтобы провести сделку.`;
-            let sent = 0;
-            for (const mb of members.ofCompany(mt.sellerCompanyId)) {
-              await senders[mb.channel]?.(mb.userId, { text });
-              sent++;
-            }
-            return json(res, 200, { ok: true, bot: sent });
           }
         }
         return json(res, 404, { error: "not found" });
@@ -270,4 +286,3 @@ export function startApi() {
   server.listen(config.port, () => console.log(`API и панель управления: http://localhost:${config.port}/admin`));
   return server;
 }
-

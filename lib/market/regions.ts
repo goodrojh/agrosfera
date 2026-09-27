@@ -30,6 +30,8 @@ export interface Region {
   /** Ориентир цены для демо-данных и первичной проверки, ₽/т с НДС, EXW */
   basePrice: number;
   directions: DirectionId[];
+  /** Часовой пояс: бот пишет предприятиям в 8:00 по местному времени */
+  tz: string;
 }
 
 export interface Direction {
@@ -72,22 +74,22 @@ export const DIRECTIONS: Direction[] = [
 ];
 
 export const REGIONS: Region[] = [
-  { id: "altai", name: "Алтайский край", macro: "Сибирь", basePrice: 29800, directions: ["china"] },
-  { id: "novosibirsk", name: "Новосибирская обл.", macro: "Сибирь", basePrice: 30100, directions: ["china"] },
-  { id: "omsk", name: "Омская обл.", macro: "Сибирь", basePrice: 30400, directions: ["china", "central_asia"] },
-  { id: "krasnoyarsk", name: "Красноярский край", macro: "Сибирь", basePrice: 29500, directions: ["china"] },
-  { id: "amur", name: "Амурская обл.", macro: "Дальний Восток", basePrice: 31900, directions: ["china"] },
-  { id: "zabaikal", name: "Забайкальский край", macro: "Дальний Восток", basePrice: 31500, directions: ["china"] },
-  { id: "kurgan", name: "Курганская обл.", macro: "Урал", basePrice: 30700, directions: ["central_asia"] },
-  { id: "chelyabinsk", name: "Челябинская обл.", macro: "Урал", basePrice: 31100, directions: ["central_asia"] },
-  { id: "bashkortostan", name: "Респ. Башкортостан", macro: "Урал", basePrice: 31300, directions: ["central_asia"] },
-  { id: "orenburg", name: "Оренбургская обл.", macro: "Урал", basePrice: 31700, directions: ["central_asia", "caspian"] },
-  { id: "saratov", name: "Саратовская обл.", macro: "Поволжье", basePrice: 32600, directions: ["caspian"] },
-  { id: "samara", name: "Самарская обл.", macro: "Поволжье", basePrice: 32300, directions: ["caspian"] },
-  { id: "volgograd", name: "Волгоградская обл.", macro: "Поволжье", basePrice: 33200, directions: ["caspian", "black_sea"] },
-  { id: "rostov", name: "Ростовская обл.", macro: "Юг", basePrice: 34600, directions: ["black_sea"] },
-  { id: "krasnodar", name: "Краснодарский край", macro: "Юг", basePrice: 35000, directions: ["black_sea"] },
-  { id: "stavropol", name: "Ставропольский край", macro: "Юг", basePrice: 34200, directions: ["black_sea"] },
+  { id: "altai", name: "Алтайский край", macro: "Сибирь", basePrice: 29800, directions: ["china"], tz: "Asia/Barnaul" },
+  { id: "novosibirsk", name: "Новосибирская обл.", macro: "Сибирь", basePrice: 30100, directions: ["china"], tz: "Asia/Novosibirsk" },
+  { id: "omsk", name: "Омская обл.", macro: "Сибирь", basePrice: 30400, directions: ["china", "central_asia"], tz: "Asia/Omsk" },
+  { id: "krasnoyarsk", name: "Красноярский край", macro: "Сибирь", basePrice: 29500, directions: ["china"], tz: "Asia/Krasnoyarsk" },
+  { id: "amur", name: "Амурская обл.", macro: "Дальний Восток", basePrice: 31900, directions: ["china"], tz: "Asia/Yakutsk" },
+  { id: "zabaikal", name: "Забайкальский край", macro: "Дальний Восток", basePrice: 31500, directions: ["china"], tz: "Asia/Chita" },
+  { id: "kurgan", name: "Курганская обл.", macro: "Урал", basePrice: 30700, directions: ["central_asia"], tz: "Asia/Yekaterinburg" },
+  { id: "chelyabinsk", name: "Челябинская обл.", macro: "Урал", basePrice: 31100, directions: ["central_asia"], tz: "Asia/Yekaterinburg" },
+  { id: "bashkortostan", name: "Респ. Башкортостан", macro: "Урал", basePrice: 31300, directions: ["central_asia"], tz: "Asia/Yekaterinburg" },
+  { id: "orenburg", name: "Оренбургская обл.", macro: "Урал", basePrice: 31700, directions: ["central_asia", "caspian"], tz: "Asia/Yekaterinburg" },
+  { id: "saratov", name: "Саратовская обл.", macro: "Поволжье", basePrice: 32600, directions: ["caspian"], tz: "Europe/Saratov" },
+  { id: "samara", name: "Самарская обл.", macro: "Поволжье", basePrice: 32300, directions: ["caspian"], tz: "Europe/Samara" },
+  { id: "volgograd", name: "Волгоградская обл.", macro: "Поволжье", basePrice: 33200, directions: ["caspian", "black_sea"], tz: "Europe/Volgograd" },
+  { id: "rostov", name: "Ростовская обл.", macro: "Юг", basePrice: 34600, directions: ["black_sea"], tz: "Europe/Moscow" },
+  { id: "krasnodar", name: "Краснодарский край", macro: "Юг", basePrice: 35000, directions: ["black_sea"], tz: "Europe/Moscow" },
+  { id: "stavropol", name: "Ставропольский край", macro: "Юг", basePrice: 34200, directions: ["black_sea"], tz: "Europe/Moscow" },
 ];
 
 export const REGION_BY_ID: Record<RegionId, Region> = Object.fromEntries(
@@ -125,4 +127,17 @@ export const MAP_NAME: Record<RegionId, string> = {
 /** Короткое имя для плотных списков: «Омская», «Алтайский», «Башкортостан» */
 export function shortRegionName(id: RegionId): string {
   return REGION_BY_ID[id].name.replace(/^Респ\.\s*/, "").replace(/\s+(обл\.|край)$/, "");
+}
+
+/** Местные дата и время в часовом поясе региона */
+export function localClock(ms: number, tz: string): { day: string; hour: number; minute: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(ms);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "0";
+  return { day: `${get("year")}-${get("month")}-${get("day")}`, hour: Number(get("hour")) % 24, minute: Number(get("minute")) };
+}
+
+/** Момент, когда в регионе было hour:00 сегодня (по местному времени) */
+export function localSince(ms: number, tz: string, hour: number): number {
+  const c = localClock(ms, tz);
+  return ms - ((c.hour - hour) * 60 + c.minute) * 60_000 - (ms % 60_000);
 }

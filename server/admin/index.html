@@ -105,7 +105,7 @@
 <section id="login" class="login hidden">
   <form id="loginForm">
     <h1>Панель управления</h1>
-    <p>АгроСфера · анкеты, участники, модерация</p>
+    <p>АгроСфера · заявки, партнёры, анкеты</p>
     <label class="f">Пароль<input type="password" id="pw" autocomplete="current-password" autofocus /></label>
     <button class="btn primary" style="width:100%">Войти</button>
     <div id="loginErr" class="err"></div>
@@ -138,7 +138,7 @@ const store = { get: (k) => { try { return sessionStorage.getItem(k); } catch { 
 
 let token = store.get("agr-admin");
 let data = null;
-let tab = "new";
+let tab = "leads";
 let openId = null;
 
 function toast(text) {
@@ -178,8 +178,6 @@ $("#logout").addEventListener("click", logout);
 
 const cropName = (id) => data.crops.find((c) => c.id === id)?.name || id;
 const regionName = (id) => data.regions.find((r) => r.id === id)?.name || id;
-const ROLE = { producer: "предприятие", exporter: "экспортёр", agent: "агент" };
-const roleTag = (r) => `<span class="role r-${r}">${ROLE[r] || r}</span>`;
 const STATUS = { new: ["Новая анкета", "b-new"], active: ["Доступ открыт", "b-active"], blocked: ["Отключён", "b-blocked"] };
 const badge = (s) => `<span class="badge ${STATUS[s][1]}">${STATUS[s][0]}</span>`;
 
@@ -193,25 +191,22 @@ async function load() {
 function render() {
   const fresh = data.companies.filter((c) => c.status === "new");
   const partners = data.companies.filter((c) => c.status !== "new");
-  const pendingBids = data.bids.filter((b) => b.status === "pending");
-  const freshMatches = data.matches.filter((m) => m.status === "new");
+  const newLeads = data.leads.filter((l) => l.status === "new");
   const tabs = [
+    ["leads", "Заявки", newLeads.length, newLeads.length > 0],
+    ["partners", "Партнёры", partners.length, false],
     ["new", "Анкеты", fresh.length, fresh.length > 0],
-    ["matches", "Совпадения", freshMatches.length, freshMatches.length > 0],
-    ["partners", "Участники", partners.length, false],
-    ["bids", "Заявки покупателей", pendingBids.length, pendingBids.length > 0],
     ["moderation", "Цены на проверке", data.moderation.length, data.moderation.length > 0],
-    ["leads", "Запросы на сделку", data.leads.length, false],
   ];
   $("#tabs").innerHTML = tabs.map(([id, label, n, hot]) => `<button class="tab ${tab === id ? "on" : ""}" data-tab="${id}">${label}<b class="${hot && tab !== id ? "hot" : ""}">${n}</b></button>`).join("");
-  $("#view").innerHTML = { new: viewNew, matches: viewMatches, partners: viewPartners, bids: viewBids, moderation: viewModeration, leads: viewLeads }[tab](fresh, partners);
+  $("#view").innerHTML = { new: viewNew, partners: viewPartners, moderation: viewModeration, leads: viewLeads }[tab](fresh, partners);
   if (openId) renderDrawer();
 }
 
 $("#view").addEventListener("change", async (e) => {
-  const sel = e.target.closest("[data-mstatus]");
+  const sel = e.target.closest("[data-lstatus]");
   if (!sel) return;
-  await api(`/api/admin/matches/${sel.dataset.mstatus}`, { method: "PATCH", body: JSON.stringify({ status: sel.value }) }).catch((err) => toast(err.message));
+  await api(`/api/admin/leads/${sel.dataset.lstatus}`, { method: "PATCH", body: JSON.stringify({ status: sel.value }) }).catch((err) => toast(err.message));
   toast("Статус обновлён");
   load();
 });
@@ -222,71 +217,35 @@ $("#tabs").addEventListener("click", (e) => {
 });
 
 function companyRow(c) {
-  const bot = c.role !== "producer" ? `<span class="sub">${esc(c.email || "")}</span>` : c.members.length ? `<span class="badge b-active">✓ бот подключён</span>` : `<span class="sub">бот не подключён</span>`;
+  const bot = c.members.length ? `<span class="badge b-active">✓ бот подключён</span>` : `<span class="sub">бот не подключён</span>`;
+  const today = c.status !== "active" ? "" : c.answeredToday
+    ? `<span class="badge b-active">ответил ${new Date(c.lastAnswer).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>`
+    : `<span class="badge b-new">ещё не ответил</span>`;
   return `<tr class="click" data-open="${c.id}">
-    <td><b>${esc(c.name)}</b>${roleTag(c.role)}<div class="sub">${esc(c.code)} · ${c.inn ? "ИНН " + esc(c.inn) : '<span style="color:var(--red)">ИНН не указан</span>'}</div></td>
+    <td><b>${esc(c.name)}</b><div class="sub">${esc(c.code)} · ${c.inn ? "ИНН " + esc(c.inn) : '<span style="color:var(--red)">ИНН не указан</span>'}</div></td>
     <td class="hide-sm">${esc(regionName(c.regionId))}</td>
-    <td>${c.role !== "producer" ? '<span class="sub">покупатель</span>' : c.crops.map((x) => `<span class="chip">${esc(cropName(x))}</span>`).join("") || '<span class="sub">не закреплены</span>'}</td>
+    <td>${c.crops.map((x) => `<span class="chip">${esc(cropName(x))}</span>`).join("") || '<span class="sub">не закреплены</span>'}</td>
     <td class="hide-sm">${esc(c.person || "")}<div class="sub">${esc(c.phone || "")}</div></td>
     <td>${badge(c.status)}<div style="margin-top:4px">${bot}</div></td>
+    <td>${today}</td>
   </tr>`;
 }
 
 function viewNew(fresh) {
   return `<div class="panel">
-    <div class="panel-head"><div><h2>Новые анкеты</h2><p>Регистрации с сайта: предприятия, экспортёры, агенты. Позвоните, проверьте компанию, у предприятия отметьте культуры — и откройте доступ в карточке.</p></div></div>
-    ${fresh.length ? `<table><thead><tr><th>Предприятие</th><th class="hide-sm">Регион</th><th>Культуры из анкеты</th><th class="hide-sm">Контакт</th><th>Статус</th></tr></thead><tbody>${fresh.map(companyRow).join("")}</tbody></table>`
+    <div class="panel-head"><div><h2>Новые анкеты</h2><p>Предприятия, заполнившие анкету «Стать партнёром». Позвоните, проверьте документы, отметьте культуры и откройте доступ в карточке.</p></div></div>
+    ${fresh.length ? `<table><thead><tr><th>Предприятие</th><th class="hide-sm">Регион</th><th>Культуры из анкеты</th><th class="hide-sm">Контакт</th><th>Статус</th><th></th></tr></thead><tbody>${fresh.map(companyRow).join("")}</tbody></table>`
       : '<div class="empty">Новых анкет нет</div>'}
   </div>`;
 }
 
 function viewPartners(_f, partners) {
+  const answered = partners.filter((c) => c.status === "active" && c.answeredToday).length;
+  const active = partners.filter((c) => c.status === "active").length;
   return `<div class="panel">
-    <div class="panel-head"><div><h2>Участники</h2><p>Галочка «Доступ открыт» и культуры — в карточке. Бот спрашивает цены каждое утро.</p></div><button class="btn primary sm" data-new>+ Добавить участника</button></div>
-    ${partners.length ? `<table><thead><tr><th>Предприятие</th><th class="hide-sm">Регион</th><th>Культуры</th><th class="hide-sm">Контакт</th><th>Статус</th></tr></thead><tbody>${partners.map(companyRow).join("")}</tbody></table>`
-      : '<div class="empty">Пока нет участников. Откройте доступ новой анкете или добавьте вручную.</div>'}
-  </div>`;
-}
-
-function viewBids() {
-  const rank = (b) => (b.status === "pending" ? 0 : 1);
-  const list = [...data.bids].sort((a, b) => rank(a) - rank(b) || b.at - a.at);
-  return `<div class="panel">
-    <div class="panel-head"><div><h2>Заявки покупателей</h2><p>С сайта. В стакан попадают только после «В стакан». Контакты видите только вы.</p></div></div>
-    ${list.length ? `<table><thead><tr><th>Когда</th><th>Культура</th><th>Цена, ₽/т</th><th>Объём</th><th class="hide-sm">Кто</th><th>Контакт</th><th></th></tr></thead><tbody>
-      ${list.map((b) => `<tr>
-        <td class="num">${date(b.at)}</td>
-        <td>${esc(cropName(b.crop))}<div class="sub">${b.regions.length ? esc(b.regions.map(regionName).join(", ")) : "любые регионы"}</div></td>
-        <td class="num"><b>${rub(b.price)}</b></td>
-        <td class="num">${rub(b.volume)} т</td>
-        <td class="hide-sm">${b.buyer === "agent" ? "агент" : "экспортёр"}</td>
-        <td>${esc(b.name)}<div class="sub">${esc(b.contact)}</div></td>
-        <td style="white-space:nowrap">${b.status === "pending"
-          ? `<button class="btn primary sm" data-bid="${b.id}" data-act="approve">В стакан</button> <button class="btn sm danger" data-bid="${b.id}" data-act="reject">Отклонить</button>`
-          : `<span class="badge b-active">в стакане</span> <button class="btn sm" data-bid="${b.id}" data-act="reject">Снять</button>`}</td>
-      </tr>`).join("")}</tbody></table>` : '<div class="empty">Заявок нет</div>'}
-  </div>`;
-}
-
-const MSTATUS = { new: "Новое", working: "В работе", done: "Сделка", rejected: "Отказ" };
-function side(p) {
-  if (!p) return '<span class="sub">без аккаунта</span>';
-  return `<b>${esc(p.name)}</b>${roleTag(p.role)}<div class="sub">${esc([p.person, p.phone, p.email].filter(Boolean).join(" · "))}</div>`;
-}
-function viewMatches() {
-  return `<div class="panel">
-    <div class="panel-head"><div><h2>Совпадения цен</h2><p>Покупатель готов заплатить не меньше цены предприятия. Свяжитесь со сторонами; «Сообщить сторонам» — предприятию в бот и обоим в личный кабинет.</p></div></div>
-    ${data.matches.length ? `<table><thead><tr><th>Когда</th><th>Культура</th><th>Покупатель</th><th>Предприятие</th><th>Цены, ₽/т</th><th>Статус</th><th></th></tr></thead><tbody>
-      ${data.matches.map((m) => `<tr class="${m.status === "new" ? "hl" : ""}">
-        <td class="num">${date(m.createdAt)}</td>
-        <td>${esc(cropName(m.crop))}<div class="sub">${esc(regionName(m.regionId))}</div></td>
-        <td>${side(m.buyer)}<div class="sub num">хочет ${rub(m.bidVolume)} т</div></td>
-        <td>${side(m.seller)}<div class="sub num">продаёт ${rub(m.askVolume)} т</div></td>
-        <td class="num">покупка <b>${rub(m.bidPrice)}</b><br/>продажа <b>${rub(m.askPrice)}</b><div class="sub" style="color:var(--brand)">+${rub(m.bidPrice - m.askPrice)}</div></td>
-        <td><select data-mstatus="${m.id}">${Object.entries(MSTATUS).map(([k, v]) => `<option value="${k}" ${k === m.status ? "selected" : ""}>${v}</option>`).join("")}</select>
-          ${m.notified ? '<div class="sub" style="margin-top:4px">✓ стороны уведомлены</div>' : ""}</td>
-        <td>${m.notified ? "" : `<button class="btn primary sm" data-notify="${m.id}">Сообщить сторонам</button>`}</td>
-      </tr>`).join("")}</tbody></table>` : '<div class="empty">Совпадений пока нет. Они появятся, как только заявка покупателя окажется не ниже цены предприятия.</div>'}
+    <div class="panel-head"><div><h2>Партнёры</h2><p>Бот пишет каждый день в 8:00 по времени региона, в 11:00 напоминает тем, кто не ответил. Сегодня ответили: ${answered} из ${active}.</p></div><button class="btn primary sm" data-new>+ Добавить предприятие</button></div>
+    ${partners.length ? `<table><thead><tr><th>Предприятие</th><th class="hide-sm">Регион</th><th>Культуры</th><th class="hide-sm">Контакт</th><th>Статус</th><th>Сегодня</th></tr></thead><tbody>${partners.map(companyRow).join("")}</tbody></table>`
+      : '<div class="empty">Пока нет партнёров. Откройте доступ новой анкете или добавьте вручную.</div>'}
   </div>`;
 }
 
@@ -302,13 +261,21 @@ function viewModeration() {
   </div>`;
 }
 
+const LSTATUS = { new: "Новая", working: "В работе", done: "Сделка", rejected: "Отказ" };
 function viewLeads() {
-  const role = { exporter: "Экспортёр", agent: "Агент", producer: "Производитель" };
   return `<div class="panel">
-    <div class="panel-head"><div><h2>Обращения</h2><p>Заявки с сайта и запросы на сделку по цене из стакана.</p></div></div>
-    ${data.leads.length ? `<table><thead><tr><th>Когда</th><th>Кто</th><th>Контакт</th><th>Объём</th><th>Что хотят</th></tr></thead><tbody>
-      ${data.leads.map((l) => `<tr><td class="num">${date(l.createdAt)}</td><td>${esc(role[l.role] || l.role)}<div class="sub">${esc(l.name)}</div></td><td>${esc(l.contact)}</td><td class="num">${l.volume ? rub(l.volume) + " т" : "—"}</td><td>${esc(l.comment || l.target)}</td></tr>`).join("")}
-    </tbody></table>` : '<div class="empty">Обращений нет</div>'}
+    <div class="panel-head"><div><h2>Заявки экспортёров и агентов</h2><p>На предложения из сводки и общие запросы. Предприятие по заявке видите только вы — свяжитесь с обеими сторонами.</p></div></div>
+    ${data.leads.length ? `<table><thead><tr><th>Когда</th><th>Покупатель</th><th>Что хочет</th><th>Предприятие</th><th>Статус</th></tr></thead><tbody>
+      ${data.leads.map((l) => `<tr class="${l.status === "new" ? "hl" : ""}">
+        <td class="num">${date(l.createdAt)}<div class="sub">№${l.id}</div></td>
+        <td><b>${esc(l.name)}</b>${l.company ? `<div class="sub">${esc(l.company)}</div>` : ""}<div class="sub"><a href="tel:${esc(l.phone.replace(/[^\d+]/g, ""))}">${esc(l.phone)}</a></div></td>
+        <td>${l.kind === "offer"
+          ? `<b>${esc(cropName(l.crop))}</b> — на предложение<div class="sub">${esc(l.offer)}</div>`
+          : `<b>${esc(l.crop ? cropName(l.crop) : "Запрос")}</b> — общий запрос<div class="sub">${esc(l.target)}${l.price ? ` · до ${rub(l.price)} ₽/т` : ""}</div>`}
+          ${l.volume ? `<div class="sub num">нужно ${rub(l.volume)} т</div>` : ""}${l.comment ? `<div class="sub">«${esc(l.comment)}»</div>` : ""}</td>
+        <td>${l.seller ? `${esc(l.seller.name)}<div class="sub">${esc(l.seller.code)} · ${esc([l.seller.person, l.seller.phone].filter(Boolean).join(", "))}</div>` : '<span class="sub">—</span>'}</td>
+        <td><select data-lstatus="${l.id}">${Object.entries(LSTATUS).map(([k, v]) => `<option value="${k}" ${k === l.status ? "selected" : ""}>${v}</option>`).join("")}</select></td>
+      </tr>`).join("")}</tbody></table>` : '<div class="empty">Заявок пока нет. Они приходят с сайта: кнопка «Оставить заявку» у предложения или общий запрос.</div>'}
   </div>`;
 }
 
@@ -316,21 +283,6 @@ $("#view").addEventListener("click", async (e) => {
   const row = e.target.closest("[data-open]");
   if (row) { openId = row.dataset.open; renderDrawer(); return; }
   if (e.target.closest("[data-new]")) { openId = "new"; renderDrawer(); return; }
-  const bid = e.target.closest("[data-bid]");
-  if (bid) {
-    bid.disabled = true;
-    const r = await api(`/api/admin/bids/${bid.dataset.bid}/${bid.dataset.act}`, { method: "POST" }).catch((err) => (toast(err.message), null));
-    toast(bid.dataset.act !== "approve" ? "Заявка снята" : r?.matches ? `Заявка в стакане · найдено совпадений: ${r.matches}` : "Заявка в стакане");
-    if (r?.matches) tab = "matches";
-    return load();
-  }
-  const nt = e.target.closest("[data-notify]");
-  if (nt) {
-    nt.disabled = true;
-    try { const r = await api(`/api/admin/matches/${nt.dataset.notify}/notify`, { method: "POST" }); toast(r.bot ? "Стороны уведомлены (предприятию — в бот)" : "Уведомлено в личных кабинетах"); }
-    catch (err) { toast(err.message); }
-    return load();
-  }
   const q = e.target.closest("[data-quote]");
   if (q) {
     q.disabled = true;
@@ -344,7 +296,7 @@ $("#view").addEventListener("click", async (e) => {
 function renderDrawer() {
   const isNew = openId === "new";
   const c = isNew
-    ? { role: "producer", email: "", name: "", inn: "", regionId: data.regions[0].id, person: "", phone: "", crops: [], notes: "", status: "new", members: [], code: "новый", inviteLink: null }
+    ? { name: "", inn: "", regionId: data.regions[0].id, person: "", phone: "", crops: [], notes: "", status: "new", members: [], code: "новый", inviteLink: null }
     : data.companies.find((x) => x.id === openId);
   if (!c) { closeDrawer(); return; }
   // Не перерисовываем открытую карточку при фоновом обновлении, чтобы не потерять ввод
@@ -354,19 +306,17 @@ function renderDrawer() {
     <div class="scrim" data-close></div>
     <aside class="drawer">
       <div class="drawer-head">
-        <div><h3>${esc(c.name || "Новый участник")}${isNew ? "" : roleTag(c.role)}</h3><div class="sub">${esc(c.code)} ${isNew ? "" : "· " + badge(c.status)}</div></div>
+        <div><h3>${esc(c.name || "Новое предприятие")}</h3><div class="sub">${esc(c.code)} ${isNew ? "" : "· " + badge(c.status)}</div></div>
         <button class="btn sm" data-close>✕</button>
       </div>
       <div class="drawer-body">
         ${isNew ? "" : `<div class="box">
           <label class="access"><input type="checkbox" id="fAccess" ${c.status === "active" ? "checked" : ""} />
-            <span><b>Доступ открыт</b><span class="sub">${c.role === "producer" ? "Может подавать цены в личном кабинете и в боте; бот каждое утро спрашивает цены по закреплённым культурам." : "Может ставить заявки на покупку и запрашивать сделки в личном кабинете."} Снимите галочку, чтобы отключить.</span></span>
+            <span><b>Доступ открыт</b><span class="sub">Бот каждый день в 8:00 по времени региона спрашивает цену, объём и качество по закреплённым культурам, ответы публикуются в сводке. Снимите галочку, чтобы отключить.</span></span>
           </label>
         </div>`}
-        ${isNew ? `<div class="box"><h4>Роль</h4><select id="fRole"><option value="producer">Предприятие (продаёт)</option><option value="exporter">Экспортёр (покупает)</option><option value="agent">Агент (покупает)</option></select>
-          <label class="f" style="margin-top:10px">Email для входа в кабинет (необязательно)<input type="text" id="fEmail" /></label></div>` : ""}
-        <div class="box" ${!isNew && c.role !== "producer" ? 'style="display:none"' : ""}>
-          <h4>Культуры участника</h4>
+        <div class="box">
+          <h4>Культуры предприятия</h4>
           <div class="crops">${data.crops.map((x) => `<label><input type="checkbox" name="crop" value="${x.id}" ${c.crops.includes(x.id) ? "checked" : ""}/>${esc(x.name)}</label>`).join("")}</div>
         </div>
         <div class="box">
@@ -382,12 +332,6 @@ function renderDrawer() {
           </div>
         </div>
         ${isNew ? "" : `<div class="box">
-          <h4>Личный кабинет</h4>
-          <div class="sub" style="margin-bottom:8px">Логин: ${esc(c.email || "не задан")}. ${c.hasPassword ? "Пароль задан." : "Пароль не задан."}</div>
-          <button class="btn sm" data-resetpw>Сбросить пароль</button>
-          <div id="pwBox" class="sub" style="margin-top:8px"></div>
-        </div>`}
-        ${isNew || c.role !== "producer" ? "" : `<div class="box">
           <h4>Telegram-бот</h4>
           ${c.members.length
             ? c.members.map((m) => `<div>✓ ${esc(m.name || m.userId)} <span class="sub">(${m.channel === "max" ? "MAX" : "Telegram"})</span></div>`).join("")
@@ -402,7 +346,7 @@ function renderDrawer() {
       </div>
       <div class="drawer-foot">
         <button class="btn primary" data-save>${isNew ? "Создать" : "Сохранить"}</button>
-        ${isNew ? "" : `<button class="btn" data-ask ${c.status === "active" && c.members.length ? "" : "disabled"} title="Бот сразу спросит цены по культурам">Запросить цены сейчас</button>`}
+        ${isNew ? "" : `<button class="btn" data-ask ${c.status === "active" && c.members.length ? "" : "disabled"} title="Бот сразу спросит предложение по культурам">Запросить предложение сейчас</button>`}
       </div>
     </aside>`;
 }
@@ -419,14 +363,6 @@ $("#drawerRoot").addEventListener("click", async (e) => {
     const v = $("#fInvite").value;
     try { await navigator.clipboard.writeText(v); } catch { $("#fInvite").select(); document.execCommand("copy"); }
     return toast("Ссылка скопирована");
-  }
-  if (e.target.closest("[data-resetpw]")) {
-    if (!confirm("Сбросить пароль? Участник войдёт с временным паролем, который вы ему передадите.")) return;
-    try {
-      const r = await api(`/api/admin/companies/${openId}/password`, { method: "POST" });
-      $("#pwBox").innerHTML = `Временный пароль: <b style="font-size:15px;color:var(--text)">${esc(r.password)}</b> — передайте участнику, он сможет сменить его в кабинете.`;
-    } catch (err) { toast(err.message); }
-    return;
   }
   if (e.target.closest("[data-ask]")) {
     try { const r = await api(`/api/admin/companies/${openId}/ask`, { method: "POST" }); toast(`Запрос отправлен (${r.sent})`); }
@@ -445,17 +381,15 @@ $("#drawerRoot").addEventListener("click", async (e) => {
     };
     try {
       if (openId === "new") {
-        body.role = $("#fRole").value;
-        body.email = $("#fEmail").value;
         const r = await api("/api/admin/companies", { method: "POST", body: JSON.stringify(body) });
-        toast("Участник создан");
+        toast("Предприятие создано");
         openId = r.id;
         delete $("#drawerRoot").dataset.id;
       } else {
         const cur = data.companies.find((x) => x.id === openId);
         const access = $("#fAccess").checked;
         body.status = access ? "active" : cur.status === "active" ? "blocked" : cur.status;
-        if (access && cur.role === "producer" && !body.crops.length) { $("#drawerErr").textContent = "Отметьте хотя бы одну культуру — по ним бот будет спрашивать цены."; return; }
+        if (access && !body.crops.length) { $("#drawerErr").textContent = "Отметьте хотя бы одну культуру — по ним бот будет спрашивать цены."; return; }
         await api(`/api/admin/companies/${openId}`, { method: "PATCH", body: JSON.stringify(body) });
         toast(access && cur.status !== "active" ? "Доступ открыт" : "Сохранено");
         delete $("#drawerRoot").dataset.id;
