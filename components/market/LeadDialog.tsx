@@ -15,7 +15,7 @@ const pct = (n?: number) => (n === undefined ? "—" : `${String(n).replace(".",
 const digits = (v: string) => v.replace(/\D/g, "").slice(0, 6);
 
 /**
- * Заявка менеджеру АгроСферы без регистрации.
+ * Заявка нашему менеджеру без регистрации.
  * offer — заявка на конкретное предложение из сводки; без него — общий запрос «подберите объём».
  */
 export default function LeadDialog({ offer, crop: initialCrop, regions: initialRegions = [], onClose }: { offer?: Quote; crop: CropId; regions?: RegionId[]; onClose: () => void }) {
@@ -73,7 +73,7 @@ export default function LeadDialog({ offer, crop: initialCrop, regions: initialR
               <Check size={24} />
             </div>
             <p className="mt-4 text-lg font-semibold text-gray-900">Заявка отправлена</p>
-            <p className="mt-1 text-sm text-gray-500">Менеджер АгроСферы свяжется с вами в ближайшее время.</p>
+            <p className="mt-1 text-sm text-gray-500">Наш менеджер свяжется с вами в ближайшее время.</p>
             {mode === "demo" && <p className="mt-3 text-xs text-gray-400">Демо-режим: заявка никуда не отправлена.</p>}
             <button onClick={onClose} className="mt-6 rounded-xl border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
               Закрыть

@@ -114,7 +114,7 @@ await sleep(400);
 await shot("7-request", { area: `document.querySelector('[role=dialog] > div')`, pad: 0 });
 
 // Предприятию: бот
-await open("/sotrudnichestvo/");
+await open("/predpriyatiyam/");
 await ev(`document.getElementById('bot').scrollIntoView(); true`);
 await clickText("#bot", "31500 200 8 1.5 46");
 await sleep(1800);

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import SiteHeader, { PageIntro } from "@/components/site/SiteHeader";
+import { PageIntro } from "@/components/site/SiteHeader";
 import FAQ from "@/components/site/FAQ";
 import Footer from "@/components/site/Footer";
 
@@ -11,8 +11,7 @@ export const metadata: Metadata = {
 export default function FaqPage() {
   return (
     <main className="min-h-screen bg-white">
-      <SiteHeader active="faq" />
-      <PageIntro title="Вопросы и ответы" lead="Коротко о сводке, заявках и партнёрстве." />
+      <PageIntro active="faq" photo="/photos/faq.webp" title="Вопросы и ответы" lead="Коротко о сводке, заявках и партнёрстве." />
       <FAQ />
       <Footer />
     </main>

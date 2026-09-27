@@ -1,100 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
-import { ArrowRight, Check } from "lucide-react";
-import { API_URL, asset } from "@/lib/config";
+import { Check } from "lucide-react";
+import { API_URL } from "@/lib/config";
 import { CROPS, type CropId } from "@/lib/market/crops";
 import { REGIONS, type RegionId } from "@/lib/market/regions";
-import { openRequest } from "./SiteHeader";
-
-// ── Две стороны: покупатели и предприятия ──
-
-const SIDES = [
-  {
-    id: "buyers",
-    title: "Экспортёрам и агентам",
-    lead: "Проверенные объёмы с известным качеством — без обзвона предприятий.",
-    steps: [
-      "Смотрите сводку: регион, объём, влажность, сорная примесь, масличность или протеин, цена.",
-      "Нажимаете «Оставить заявку» у нужного предложения или оставляете общий запрос.",
-      "Менеджер проверяет партию и предприятие, согласует условия.",
-      "Выкупаем и отгружаем партию. Условия — в договоре с АгроСферой.",
-    ],
-    cta: { label: "Смотреть сводку", href: "/#terminal" },
-  },
-  {
-    id: "producers",
-    title: "Предприятиям",
-    lead: "Покупатели на ваш объём — одним сообщением в день.",
-    steps: [
-      "Заполняете анкету. Менеджер звонит и заранее проверяет документы.",
-      "Каждый день в 8:00 по вашему времени бот в Telegram просит предложение.",
-      "Отвечаете одной строкой: цена, объём, влажность, сорная примесь, масличность.",
-      "Предложение появляется в сводке без названия предприятия, покупателя приводим мы.",
-    ],
-    cta: { label: "Стать партнёром", href: "#partner" },
-  },
-] as const;
-
-export function Sides() {
-  return (
-    <section className="bg-white px-4 md:px-8 py-16 md:py-20">
-      <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-5">
-        {SIDES.map((s) => (
-          <div key={s.id} id={s.id} className="rounded-2xl border border-gray-200 p-6 md:p-8 flex flex-col scroll-mt-6">
-            <h2 className="text-[24px] font-semibold text-gray-900">{s.title}</h2>
-            <p className="mt-2 text-gray-600">{s.lead}</p>
-            <ol className="mt-6 space-y-3.5 flex-1">
-              {s.steps.map((t, i) => (
-                <li key={t} className="flex gap-3 text-[15px] text-gray-700 leading-relaxed">
-                  <span className="shrink-0 w-6 h-6 rounded-full border border-[#1F5A25]/25 text-[#1F5A25] text-xs font-semibold flex items-center justify-center mt-0.5">{i + 1}</span>
-                  {t}
-                </li>
-              ))}
-            </ol>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <a href={s.cta.href.startsWith("#") ? s.cta.href : asset(s.cta.href)} className="inline-flex items-center gap-2 rounded-lg bg-[#1F5A25] text-white px-5 py-3 text-[15px] font-semibold hover:bg-[#174a1c] transition-colors">
-                {s.cta.label} <ArrowRight size={16} />
-              </a>
-              {s.id === "buyers" && (
-                <button onClick={openRequest} className="rounded-lg border border-gray-200 px-5 py-3 text-[15px] font-semibold text-gray-800 hover:bg-gray-50">
-                  Оставить запрос
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-// ── Почему через брокера ──
-
-const WHY = [
-  ["Только проверенные предприятия", "Документы и склад проверяем до того, как предприятие попадёт в сводку."],
-  ["Качество известно заранее", "Влажность, сорная примесь и масличность или протеин — в каждом предложении."],
-  ["Свежие данные", "Предприятия обновляют предложения каждое утро, старше 3 дней в сводке не бывает."],
-  ["Одна точка контакта", "Проверка, договор, выкуп и отгрузка — через АгроСферу."],
-];
-
-export function Why() {
-  return (
-    <section className="bg-[#f4f6f2] px-4 md:px-8 py-16 md:py-20">
-      <div className="max-w-6xl mx-auto">
-        <h2 className="text-[30px] md:text-[40px] font-semibold tracking-tight text-gray-900">Почему через АгроСферу</h2>
-        <div className="mt-8 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {WHY.map(([t, d]) => (
-            <div key={t} className="rounded-2xl bg-white border border-gray-200 p-6">
-              <p className="text-lg font-semibold text-gray-900 leading-snug">{t}</p>
-              <p className="mt-2 text-[15px] text-gray-600 leading-relaxed">{d}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
 
 // ── Анкета предприятия ──
 
@@ -138,7 +48,7 @@ export function PartnerForm() {
         <div>
           <h2 className="text-[30px] md:text-[40px] font-semibold tracking-tight leading-tight">Стать партнёром</h2>
           <p className="mt-4 text-white/65 text-[17px] leading-relaxed max-w-md">
-            Анкета для предприятий-производителей. Менеджер позвонит, проверит документы и подключит бота — после этого ваши предложения появятся в сводке.
+            Менеджер позвонит, проведёт верификацию и подключит бота. После этого от вас нужно только каждое утро присылать предложение.
           </p>
           <ul className="mt-6 space-y-2.5 text-white/70 text-[15px]">
             {["Бесплатно для предприятий", "Название предприятия в сводке скрыто", "Никаких обязательств продавать"].map((t) => (
@@ -155,7 +65,7 @@ export function PartnerForm() {
             <p className="text-xl font-semibold">✓ Анкета отправлена</p>
             <p className="mt-2 text-white/70 leading-relaxed">
               {API_URL
-                ? "Менеджер свяжется с вами в рабочее время, проверит документы и подключит бота. Бот узнает вас по номеру телефона из анкеты."
+                ? "Менеджер свяжется с вами в рабочее время, проведёт верификацию и подключит бота. Бот узнает вас по номеру телефона из анкеты."
                 : "Сейчас сайт работает в демо-режиме: анкета не отправлена. После подключения сервера анкеты будут приходить менеджеру."}
             </p>
           </div>

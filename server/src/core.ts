@@ -66,7 +66,7 @@ const rounds = new Map<string, Round>();
 const rub = (n: number) => Math.round(n).toLocaleString("ru-RU");
 const INVITE_RE = /^[A-Z0-9]{8}$/i;
 const SKIP_RE = /^(нет|не продаём|не продаем|нету|0|-|—|пропуск|пропустить)$/i;
-const applyUrl = () => `${config.siteUrl}/sotrudnichestvo/#partner`;
+const applyUrl = () => `${config.siteUrl}/predpriyatiyam/#partner`;
 
 const cropList = (crops: CropId[]) => crops.map((c) => CROP_BY_ID[c].name).join(", ");
 
@@ -82,7 +82,7 @@ function guest(): Outgoing[] {
   return [
     {
       text:
-        "Бот АгроСферы работает с предприятиями-партнёрами, которые прошли проверку.\n\n" +
+        "Бот компании АгроСфера работает с предприятиями-партнёрами, которые прошли проверку.\n\n" +
         `Чтобы стать партнёром, заполните анкету на сайте: ${applyUrl()}\n\n` +
         "Если анкета одобрена — нажмите «Отправить номер», и мы найдём вашу карточку.",
       requestContact: true,
@@ -92,7 +92,7 @@ function guest(): Outgoing[] {
 
 function statusText(c: CompanyRow): string | null {
   if (c.status === "new") return "Ваша анкета на проверке. Менеджер свяжется с вами, после разговора откроем доступ — и бот начнёт присылать запросы цен.";
-  if (c.status === "blocked") return "Доступ к боту закрыт. Свяжитесь с менеджером АгроСферы.";
+  if (c.status === "blocked") return "Доступ к боту закрыт. Свяжитесь с нашим менеджером.";
   if (!c.crops.length) return "Доступ открыт, но за вами пока не закреплены культуры. Менеджер добавит их — и бот начнёт спрашивать цены.";
   return null;
 }
@@ -116,7 +116,7 @@ function link(msg: Incoming, company: CompanyRow, via: string): Outgoing[] {
   members.link(msg.channel, msg.userId, company.id, msg.userName ?? msg.userHandle);
   notifyAdmin(`🔗 ${company.name} (${company.code}) подключился к боту: ${msg.userHandle ?? msg.userName ?? msg.userId} · ${via}`);
   const head: Outgoing = {
-    text: `Здравствуйте! Предприятие ${company.name} подключено к АгроСфере.\nКультуры: ${cropList(company.crops) || "пока не закреплены"}.\n\nКаждое утро в 8:00 по вашему времени бот попросит цену, объём и качество. Изменилось что-то днём — просто пришлите новую строку.`,
+    text: `Здравствуйте! Предприятие ${company.name} подключено к сервису АгроСфера.\nКультуры: ${cropList(company.crops) || "пока не закреплены"}.\n\nКаждое утро в 8:00 по вашему времени бот попросит цену, объём и качество. Изменилось что-то днём — просто пришлите новую строку.`,
     removeKeyboard: true,
   };
   return [head, ...beginRound(msg.channel, msg.userId, company, false)];

@@ -5,13 +5,12 @@ import { asset, CONTACT_EMAIL, MAX_BOT_URL, TELEGRAM_BOT_URL } from "@/lib/confi
 
 /** Подвал сайта */
 export default function Footer({ className }: { className?: string }) {
-  const coop = (hash: string) => asset(`/sotrudnichestvo/${hash}`);
-  const botHref = TELEGRAM_BOT_URL || coop("#bot");
-  const maxHref = MAX_BOT_URL || coop("#bot");
+  const botHref = TELEGRAM_BOT_URL || asset("/predpriyatiyam/#bot");
+  const maxHref = MAX_BOT_URL || asset("/predpriyatiyam/#bot");
 
   const columns = [
     { title: "Сводка", links: [["Предложения", asset("/#terminal")], ["Оставить заявку", asset("/?zayavka=1#terminal")]] },
-    { title: "Сотрудничество", links: [["Экспортёрам и агентам", coop("#buyers")], ["Предприятиям", coop("#producers")], ["Стать партнёром", coop("#partner")]] },
+    { title: "Партнёрам", links: [["Экспортёрам", asset("/eksporteram/")], ["Предприятиям", asset("/predpriyatiyam/")], ["Стать партнёром", asset("/predpriyatiyam/#partner")]] },
     { title: "Компания", links: [["О нас", asset("/o-nas/")], ["Вопросы и ответы", asset("/faq/")], ...(CONTACT_EMAIL ? [[CONTACT_EMAIL, `mailto:${CONTACT_EMAIL}`]] : [])] },
     { title: "Бот для партнёров", links: [["Telegram", botHref], ["MAX", maxHref]] },
   ];

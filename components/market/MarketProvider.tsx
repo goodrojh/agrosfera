@@ -3,14 +3,22 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "@/lib/config";
 import { createDemoMarket, type DemoMarket } from "@/lib/market/demo";
-import { activeOffers } from "@/lib/market/aggregate";
+import { activeOffers, computeIndex } from "@/lib/market/aggregate";
 import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
 import type { RegionId } from "@/lib/market/regions";
 import type { Company, DailyClose, QualityValues, Quote } from "@/lib/market/types";
 
 export const SIM_COMPANY_ID = "c-you";
 
-/** Заявка экспортёра или агента: на предложение из сводки (offerId) или общий запрос */
+/** Сколько доступно сегодня по России по культуре */
+export interface CropSummary {
+  crop: CropId;
+  volume: number;
+  count: number;
+  index: number | null;
+}
+
+/** Заявка экспортёра: на предложение из сводки (offerId) или общий запрос */
 export interface LeadInput {
   offerId?: string;
   crop: CropId;
@@ -38,6 +46,8 @@ interface MarketValue {
   offers: Quote[];
   /** «Сейчас» для расчётов: обновляется раз в минуту и с каждым новым ответом */
   now: number;
+  /** Объёмы по всем культурам — для первого экрана */
+  summary: CropSummary[];
   lastEventAt: number;
   /** Отправить заявку менеджеру. Возвращает текст ошибки или null */
   submitLead: (input: LeadInput) => Promise<string | null>;
@@ -64,6 +74,14 @@ export function useMarket(): MarketValue {
 const EMPTY: CropStore = { demo: null, companies: [], history: [], recent: [], lastEventAt: 0 };
 const lastAt = (qs: Quote[]) => qs.reduce((m, q) => Math.max(m, q.at), 0);
 
+/** Итоги по культурам из демо-рынков в памяти */
+function demoSummary(stores: Map<CropId, CropStore>, now: number): CropSummary[] {
+  return CROPS.map((c) => {
+    const offers = activeOffers(stores.get(c.id)?.recent ?? [], now);
+    return { crop: c.id, volume: offers.reduce((s, q) => s + q.volume, 0), count: offers.length, index: computeIndex(offers)?.index ?? null };
+  });
+}
+
 function makeDemoStore(crop: CropId, now: number): CropStore {
   const c = CROP_BY_ID[crop];
   const demo = createDemoMarket(now, {
@@ -83,6 +101,7 @@ export default function MarketProvider({ children }: { children: React.ReactNode
   const [active, setActive] = useState<CropStore>(EMPTY);
   // Предложения стареют (3 дня) — пересчитываем раз в минуту, даже если новых ответов нет
   const [clock, setClock] = useState(0);
+  const [summary, setSummary] = useState<CropSummary[]>([]);
   const stores = useRef(new Map<CropId, CropStore>());
   const cropRef = useRef<CropId>("flax");
 
@@ -141,6 +160,9 @@ export default function MarketProvider({ children }: { children: React.ReactNode
     setActive(st);
     setReady(true);
     setConnected(true);
+    // Остальные культуры — для сводки объёмов на первом экране
+    for (const c of CROPS) if (!stores.current.has(c.id)) stores.current.set(c.id, makeDemoStore(c.id, Date.now()));
+    setSummary(demoSummary(stores.current, Date.now()));
 
     // Новые ответы — только по выбранной культуре и только когда вкладка видна
     let timer: ReturnType<typeof setTimeout>;
@@ -148,7 +170,10 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       timer = setTimeout(() => {
         const c = cropRef.current;
         const s = stores.current.get(c);
-        if (!document.hidden && s?.demo) pushTo(c, s.demo.next(Date.now(), s.recent));
+        if (!document.hidden && s?.demo) {
+          pushTo(c, s.demo.next(Date.now(), s.recent));
+          setSummary(demoSummary(stores.current, Date.now()));
+        }
         loop();
       }, 5000 + Math.random() * 5000);
     };
@@ -164,6 +189,19 @@ export default function MarketProvider({ children }: { children: React.ReactNode
     let es: EventSource | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
 
+    let summaryTimer: ReturnType<typeof setTimeout> | null = null;
+    const loadSummary = () =>
+      fetch(`${API_URL}/api/summary`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d) => !closed && setSummary(d.crops ?? []))
+        .catch(() => {});
+    // Новые ответы идут пачками по утрам — пересчитываем итоги не чаще раза в 5 секунд
+    const refreshSummary = () => {
+      if (!summaryTimer) summaryTimer = setTimeout(() => ((summaryTimer = null), void loadSummary()), 5000);
+    };
+    void loadSummary();
+    const summaryPoll = setInterval(() => void loadSummary(), 60_000);
+
     loadLive(cropRef.current).then(() => {
       if (closed) return;
       es = new EventSource(`${API_URL}/api/stream`);
@@ -172,6 +210,7 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       es.addEventListener("quote", (e) => {
         const q: Quote = JSON.parse((e as MessageEvent).data);
         pushTo(q.crop ?? "flax", q);
+        refreshSummary();
       });
       es.addEventListener("company", () => void loadLive(cropRef.current));
       poll = setInterval(() => void loadLive(cropRef.current), 5 * 60_000);
@@ -181,6 +220,8 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       closed = true;
       es?.close();
       if (poll) clearInterval(poll);
+      clearInterval(summaryPoll);
+      if (summaryTimer) clearTimeout(summaryTimer);
     };
   }, [mode, pushTo, loadLive]);
 
@@ -234,11 +275,12 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       history: active.history,
       offers,
       now,
+      summary,
       lastEventAt: active.lastEventAt,
       submitLead,
       submitFromSimulator,
     }),
-    [ready, mode, connected, crop, setCrop, active, companyById, offers, now, submitLead, submitFromSimulator]
+    [ready, mode, connected, crop, setCrop, active, companyById, offers, now, summary, submitLead, submitFromSimulator]
   );
 
   return <MarketContext.Provider value={value}>{children}</MarketContext.Provider>;

@@ -349,7 +349,7 @@ export const quotes = {
 
 export type LeadStatus = "new" | "working" | "done" | "rejected";
 
-/** Заявка экспортёра или агента: на конкретное предложение (offer) или общий запрос (request) */
+/** Заявка экспортёра: на конкретное предложение (offer) или общий запрос (request) */
 export interface LeadRow {
   id: number;
   kind: "offer" | "request";

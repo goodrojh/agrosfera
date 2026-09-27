@@ -8,7 +8,7 @@ import { config, mskDay } from "./config.ts";
 import { companies, leads, members, quotes, type CompanyStatus, type LeadStatus } from "./db.ts";
 import { beginRound, bus, moderate, notifyAdmin, senders } from "./core.ts";
 import { allow, bearer, clientIp, clip, json, readJson } from "./http.ts";
-import { OFFER_TTL } from "../../lib/market/aggregate.ts";
+import { activeOffers, computeIndex, OFFER_TTL } from "../../lib/market/aggregate.ts";
 import { describe } from "../../lib/market/dialog.ts";
 import { isValidInn } from "../../lib/market/inn.ts";
 import { REGIONS, REGION_BY_ID, isRegionId, localSince } from "../../lib/market/regions.ts";
@@ -103,6 +103,18 @@ export function startApi() {
         });
       }
 
+      // ── Сколько объёма доступно сегодня по России по каждой культуре (первый экран сайта) ──
+      if (req.method === "GET" && path === "/api/summary") {
+        const now = Date.now();
+        return json(res, 200, {
+          crops: CROPS.map((c) => {
+            const offers = activeOffers(quotes.since(now - OFFER_TTL, c.id), now);
+            return { crop: c.id, volume: offers.reduce((s, q) => s + q.volume, 0), count: offers.length, index: computeIndex(offers)?.index ?? null };
+          }),
+          serverTime: now,
+        });
+      }
+
       if (req.method === "GET" && path === "/api/stream") {
         res.writeHead(200, {
           "Content-Type": "text/event-stream; charset=utf-8",
@@ -125,7 +137,7 @@ export function startApi() {
         return;
       }
 
-      // ── Заявка экспортёра или агента: на предложение из сводки или общий запрос ──
+      // ── Заявка экспортёра: на предложение из сводки или общий запрос ──
       if (req.method === "POST" && path === "/api/leads") {
         if (!allow(`lead:${ip}`, 8)) return json(res, 429, { error: "Слишком много заявок подряд — попробуйте через 10 минут" });
         const b = await readJson(req);

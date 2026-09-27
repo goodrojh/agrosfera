@@ -264,7 +264,7 @@ function viewModeration() {
 const LSTATUS = { new: "Новая", working: "В работе", done: "Сделка", rejected: "Отказ" };
 function viewLeads() {
   return `<div class="panel">
-    <div class="panel-head"><div><h2>Заявки экспортёров и агентов</h2><p>На предложения из сводки и общие запросы. Предприятие по заявке видите только вы — свяжитесь с обеими сторонами.</p></div></div>
+    <div class="panel-head"><div><h2>Заявки экспортёров</h2><p>На предложения из сводки и общие запросы. Предприятие по заявке видите только вы — свяжитесь с обеими сторонами.</p></div></div>
     ${data.leads.length ? `<table><thead><tr><th>Когда</th><th>Покупатель</th><th>Что хочет</th><th>Предприятие</th><th>Статус</th></tr></thead><tbody>
       ${data.leads.map((l) => `<tr class="${l.status === "new" ? "hl" : ""}">
         <td class="num">${date(l.createdAt)}<div class="sub">№${l.id}</div></td>

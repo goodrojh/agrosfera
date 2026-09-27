@@ -6,7 +6,7 @@ const inter = Inter({ variable: "--font-inter", subsets: ["latin", "cyrillic"] }
 const mono = JetBrains_Mono({ variable: "--font-mono-jb", subsets: ["latin", "cyrillic"] });
 
 export const metadata: Metadata = {
-  title: "АгроСфера — агроброкер: сводка предложений предприятий",
+  title: "АгроСфера — сводка предложений предприятий",
   description:
     "Ежедневная сводка предложений проверенных предприятий: регион, объём, влажность, сорная примесь, масличность и цена. Оставьте заявку — АгроСфера проведёт сделку.",
 };
