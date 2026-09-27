@@ -128,7 +128,7 @@ export default function RussiaMap({
   return (
     <div
       ref={wrapRef}
-      className="relative w-full select-none"
+      className="relative w-full h-full select-none"
       onPointerMove={onMove}
       onPointerLeave={() => {
         if (tipRef.current) tipRef.current.style.opacity = "0";
@@ -137,7 +137,7 @@ export default function RussiaMap({
     >
       <svg
         viewBox={`0 0 ${mapData.width} ${mapData.height}`}
-        className="w-full h-auto"
+        className="w-full h-full"
         role="group"
         aria-label="Карта регионов России"
         onClick={pick}

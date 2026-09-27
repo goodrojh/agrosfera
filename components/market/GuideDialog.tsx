@@ -3,12 +3,14 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, X } from "lucide-react";
 import { asset } from "@/lib/config";
+import { openPartner } from "@/lib/actions";
 
 interface Step {
   title: string;
   text: string;
   image: string;
-  link?: { label: string; href: string };
+  /** Кнопка действия под текстом шага — открывает форму на месте */
+  action?: { label: string; run: () => void };
 }
 
 const STEPS: Step[] = [
@@ -51,7 +53,7 @@ const STEPS: Step[] = [
     title: "Предприятию: одно сообщение в день",
     text: "Каждый день в 8:00 по местному времени бот в Telegram просит предложение. Ответ одной строкой: цена, объём, влажность, сорная примесь, масличность — например, «31500 200 8 1.5 46».",
     image: "/guide/8-bot.webp",
-    link: { label: "Стать партнёром", href: "/predpriyatiyam/#partner" },
+    action: { label: "Стать партнёром", run: openPartner },
   },
 ];
 
@@ -129,10 +131,17 @@ export default function GuideDialog({ onClose }: { onClose: () => void }) {
                 {step.title}
               </p>
               <p className="mt-1.5 text-[15px] md:text-base text-gray-600 leading-relaxed max-w-3xl">{step.text}</p>
-              {step.link && (
-                <a href={asset(step.link.href)} className="mt-3 inline-block text-sm font-semibold text-[#1F5A25] underline underline-offset-2">
-                  {step.link.label} →
-                </a>
+              {step.action && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    step.action!.run();
+                  }}
+                  className="mt-3 inline-block text-sm font-semibold text-[#1F5A25] underline underline-offset-2"
+                >
+                  {step.action.label} →
+                </button>
               )}
             </div>
           </div>

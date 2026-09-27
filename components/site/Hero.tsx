@@ -30,12 +30,12 @@ export default function Hero() {
         <SiteHeader active="quotes" transparent />
       </div>
 
-      <div className="relative max-w-6xl mx-auto px-4 md:px-8 pt-8 pb-12 md:pt-12 md:pb-20 grid lg:grid-cols-[1.1fr_1fr] gap-10 lg:gap-14 items-center">
+      <div className="relative max-w-6xl mx-auto px-4 md:px-8 pt-8 pb-12 md:pt-12 md:pb-20 grid lg:grid-cols-[1.1fr_1fr] gap-10 lg:gap-14 items-start">
         {/* Текст */}
         <div>
           <h1 className="text-[34px] sm:text-[44px] lg:text-[52px] font-semibold leading-[1.06] tracking-[-0.02em] text-balance">Проверенные объёмы от предприятий&nbsp;— каждое утро</h1>
           <p className="mt-5 text-[17px] md:text-lg text-white/75 max-w-xl leading-relaxed text-pretty">
-            Предприятия-партнёры ежедневно присылают нам цену, объём и качество продукции. Мы публикуем сводку по регионам, а сделку ведём сами — от проверки партии до отгрузки.
+            Предприятия-партнёры ежедневно присылают нам цену, объём и качество продукции. Мы публикуем сводку по регионам, проводим сделку и доставляем груз в нужную экспортёру точку.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row gap-3">
             <a href="#terminal" className="inline-flex items-center justify-center gap-2 rounded-lg bg-white text-[#0b1f0e] px-6 py-3.5 text-[15px] font-semibold hover:bg-white/90 transition-colors">
@@ -60,7 +60,7 @@ export default function Hero() {
         </div>
 
         {/* Белая сводка: свободный объём по России по каждой культуре */}
-        <div className="rounded-2xl bg-white text-gray-900 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.6)] p-5 md:p-6">
+        <div className="lg:mt-2 rounded-2xl bg-white text-gray-900 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.6)] p-5 md:p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-lg font-semibold leading-tight">Доступно сегодня по России</p>

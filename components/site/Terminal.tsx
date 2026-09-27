@@ -14,8 +14,6 @@ import { REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
 import { ago, pct, rub, time } from "@/lib/market/format";
 import type { DailyClose, Quote } from "@/lib/market/types";
 
-/** Событие «открыть общий запрос» — его шлёт кнопка «Оставить заявку» в шапке */
-export const REQUEST_EVENT = "agr-request";
 
 const PERIODS = [
   { id: "day", label: "День", days: 1 },
@@ -231,8 +229,9 @@ function MapDialog({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40" onClick={onClose} role="dialog" aria-modal="true" aria-label="Выбор регионов на карте">
-      <div className="w-full max-w-5xl max-h-full overflow-y-auto rounded-2xl bg-white p-5 md:p-7 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 mb-4">
+      {/* Окно всегда помещается в экран: карта вписывается в свободную высоту, кнопки видны без прокрутки */}
+      <div className="w-full max-w-5xl h-full max-h-[820px] flex flex-col rounded-2xl bg-white p-5 md:p-7 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="shrink-0 flex items-start justify-between gap-4 mb-4">
           <div>
             <p className="text-lg font-semibold text-gray-900">Выберите регионы</p>
             <p className="text-sm text-gray-500">Нажимайте на регионы, чтобы отметить несколько. Чем темнее, тем дешевле; серые — нет предприятий.</p>
@@ -242,9 +241,11 @@ function MapDialog({
           </button>
         </div>
 
-        <RussiaMap stats={stats} selected={draft} onToggle={toggle} />
+        <div className="flex-1 min-h-0">
+          <RussiaMap stats={stats} selected={draft} onToggle={toggle} />
+        </div>
 
-        <div className="mt-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-t border-gray-100 pt-4">
+        <div className="shrink-0 mt-4 flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4 border-t border-gray-100 pt-4">
           <div className="flex flex-wrap gap-2 min-h-[32px] items-center">
             {draft.length === 0 && <span className="text-sm text-gray-400">Ничего не выбрано — будут показаны все регионы</span>}
             {draft.map((id) => (
@@ -289,17 +290,6 @@ export default function Terminal() {
   const closeGuide = useCallback(() => setGuideOpen(false), []);
   const cropInfo = CROP_BY_ID[crop];
 
-  // Кнопка «Оставить заявку» в шапке и ссылка /?zayavka с других страниц
-  useEffect(() => {
-    const open = () => setLead({});
-    window.addEventListener(REQUEST_EVENT, open);
-    if (new URLSearchParams(window.location.search).has("zayavka")) {
-      document.getElementById("terminal")?.scrollIntoView();
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLead({});
-    }
-    return () => window.removeEventListener(REQUEST_EVENT, open);
-  }, []);
 
   const scope = useMemo<Scope>(() => ({ regions }), [regions]);
   const scoped = useMemo(() => offers.filter((q) => inScope(q.regionId, scope)), [offers, scope]);

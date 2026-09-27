@@ -2,16 +2,20 @@
 
 import React from "react";
 import { asset, CONTACT_EMAIL, MAX_BOT_URL, TELEGRAM_BOT_URL } from "@/lib/config";
+import { openPartner, openRequest } from "@/lib/actions";
+
+/** Пункт подвала: ссылка на страницу или действие (форма открывается на месте) */
+type FooterItem = [string, string | (() => void)];
 
 /** Подвал сайта */
 export default function Footer({ className }: { className?: string }) {
   const botHref = TELEGRAM_BOT_URL || asset("/predpriyatiyam/#bot");
   const maxHref = MAX_BOT_URL || asset("/predpriyatiyam/#bot");
 
-  const columns = [
-    { title: "Сводка", links: [["Предложения", asset("/#terminal")], ["Оставить заявку", asset("/?zayavka=1#terminal")]] },
-    { title: "Партнёрам", links: [["Экспортёрам", asset("/eksporteram/")], ["Предприятиям", asset("/predpriyatiyam/")], ["Стать партнёром", asset("/predpriyatiyam/#partner")]] },
-    { title: "Компания", links: [["О нас", asset("/o-nas/")], ["Вопросы и ответы", asset("/faq/")], ...(CONTACT_EMAIL ? [[CONTACT_EMAIL, `mailto:${CONTACT_EMAIL}`]] : [])] },
+  const columns: { title: string; links: FooterItem[] }[] = [
+    { title: "Сводка", links: [["Предложения", asset("/#terminal")], ["Оставить заявку", openRequest]] },
+    { title: "Партнёрам", links: [["Экспортёрам", asset("/eksporteram/")], ["Предприятиям", asset("/predpriyatiyam/")], ["Стать партнёром", openPartner]] },
+    { title: "Компания", links: [["О нас", asset("/o-nas/")], ["Вопросы и ответы", asset("/faq/")], ...(CONTACT_EMAIL ? [[CONTACT_EMAIL, `mailto:${CONTACT_EMAIL}`] as FooterItem] : [])] },
     { title: "Бот для партнёров", links: [["Telegram", botHref], ["MAX", maxHref]] },
   ];
 
@@ -24,11 +28,17 @@ export default function Footer({ className }: { className?: string }) {
             <div key={col.title} className="flex flex-col">
               <h3 className="text-white font-bold text-[14px] mb-4">{col.title}</h3>
               <div className="flex flex-col gap-1">
-                {col.links.map(([label, href]) => (
-                  <a key={label} href={href} className="text-[#86977f] text-[13px] leading-[2.2] hover:text-white transition-colors w-fit">
-                    {label}
-                  </a>
-                ))}
+                {col.links.map(([label, target]) =>
+                  typeof target === "function" ? (
+                    <button key={label} type="button" onClick={target} className="text-left text-[#86977f] text-[13px] leading-[2.2] hover:text-white transition-colors w-fit">
+                      {label}
+                    </button>
+                  ) : (
+                    <a key={label} href={target} className="text-[#86977f] text-[13px] leading-[2.2] hover:text-white transition-colors w-fit">
+                      {label}
+                    </a>
+                  )
+                )}
               </div>
             </div>
           ))}

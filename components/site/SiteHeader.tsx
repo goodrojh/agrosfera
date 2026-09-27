@@ -3,14 +3,12 @@
 import React, { useState } from "react";
 import { Menu, X } from "lucide-react";
 import { asset } from "@/lib/config";
+import { openRequest } from "@/lib/actions";
+
+export { openRequest };
 
 export type SiteSection = "quotes" | "exporters" | "producers" | "about" | "faq";
 
-/** Открыть общий запрос: на главной — окно заявки, с других страниц — переход на главную */
-export function openRequest() {
-  if (document.getElementById("terminal")) window.dispatchEvent(new Event("agr-request"));
-  else window.location.href = asset("/?zayavka=1#terminal");
-}
 
 const NAV: { id: SiteSection; label: string; href: string }[] = [
   { id: "quotes", label: "Котировки", href: "/#terminal" },

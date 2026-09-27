@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
-import { useMarket } from "@/components/market/MarketProvider";
+import { sendLead } from "@/lib/actions";
+import { API_URL } from "@/lib/config";
 import { CROPS, CROP_BY_ID, type CropId } from "@/lib/market/crops";
 import { REGION_BY_ID, type RegionId } from "@/lib/market/regions";
 import { rub } from "@/lib/market/format";
@@ -19,7 +20,7 @@ const digits = (v: string) => v.replace(/\D/g, "").slice(0, 6);
  * offer — заявка на конкретное предложение из сводки; без него — общий запрос «подберите объём».
  */
 export default function LeadDialog({ offer, crop: initialCrop, regions: initialRegions = [], onClose }: { offer?: Quote; crop: CropId; regions?: RegionId[]; onClose: () => void }) {
-  const { submitLead, mode } = useMarket();
+  const mode = API_URL ? "live" : "demo";
   const [crop, setCrop] = useState<CropId>(offer?.crop ?? initialCrop);
   const [volume, setVolume] = useState(offer ? String(offer.volume) : "");
   const [price, setPrice] = useState("");
@@ -27,6 +28,7 @@ export default function LeadDialog({ offer, crop: initialCrop, regions: initialR
   const [company, setCompany] = useState("");
   const [phone, setPhone] = useState("");
   const [comment, setComment] = useState("");
+  const [delivery, setDelivery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<"form" | "sending" | "done">("form");
   const cropInfo = CROP_BY_ID[crop];
@@ -45,7 +47,7 @@ export default function LeadDialog({ offer, crop: initialCrop, regions: initialR
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setState("sending");
-    const err = await submitLead({
+    const err = await sendLead({
       offerId: offer?.id,
       crop,
       regions: offer ? undefined : initialRegions,
@@ -54,7 +56,8 @@ export default function LeadDialog({ offer, crop: initialCrop, regions: initialR
       name,
       company,
       phone,
-      comment,
+      // Пункт доставки уходит менеджеру вместе с комментарием
+      comment: [delivery.trim() && `Доставка: ${delivery.trim()}`, comment.trim()].filter(Boolean).join(". "),
     });
     if (err) {
       setError(err);
@@ -84,7 +87,7 @@ export default function LeadDialog({ offer, crop: initialCrop, regions: initialR
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-lg font-semibold text-gray-900">{offer ? "Заявка на предложение" : "Подобрать объём"}</p>
-                <p className="text-sm text-gray-500">{offer ? "Менеджер проверит партию и проведёт сделку" : "Опишите, что нужно, — подберём у партнёров"}</p>
+                <p className="text-sm text-gray-500">{offer ? "Проверим партию, проведём сделку и доставим груз" : "Опишите, что нужно, — подберём у партнёров"}</p>
               </div>
               <button type="button" onClick={onClose} aria-label="Закрыть" className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100">
                 <X size={18} />
@@ -139,11 +142,12 @@ export default function LeadDialog({ offer, crop: initialCrop, regions: initialR
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Имя" autoComplete="name" className={field} />
               <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Телефон" inputMode="tel" autoComplete="tel" className={field} />
               <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Компания" autoComplete="organization" className={field + " col-span-2"} />
+              <input value={delivery} onChange={(e) => setDelivery(e.target.value)} placeholder="Куда доставить: порт, станция, склад" className={field + " col-span-2"} />
               <textarea
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 rows={2}
-                placeholder={offer ? "Комментарий: базис, сроки, оплата" : "Требования к качеству, базис, сроки"}
+                placeholder={offer ? "Комментарий: сроки, оплата" : "Требования к качеству, сроки"}
                 className={field + " col-span-2 resize-none"}
               />
             </div>

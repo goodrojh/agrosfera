@@ -39,7 +39,7 @@ ws.onmessage = (m) => {
 const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
 const ev = async (expr) => (await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true })).result?.value;
 
-await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 2, mobile: false });
 await send("Page.enable");
 
 async function open(path) {
@@ -48,13 +48,13 @@ async function open(path) {
   await ev(`(() => {
     document.querySelector('video')?.remove();
     const s = document.createElement('style');
-    s.textContent = '.guide-hl{outline:3px solid #f59e0b!important;outline-offset:6px;border-radius:14px;box-shadow:0 0 0 9999px rgba(15,36,19,.28)!important;position:relative;z-index:5}';
+    s.textContent = '.guide-hl{outline:3px solid #f59e0b!important;outline-offset:4px;border-radius:12px;position:relative;z-index:5}';
     document.head.appendChild(s);
     return true;
   })()`);
 }
 
-/** Подсветить элемент и снять область вокруг опорного блока */
+/** Подсветить элемент и снять крупно только нужный участок (area) — чтобы текст на скриншоте читался без лупы */
 async function shot(name, { highlight, area, pad = 16 }) {
   await ev(`document.querySelectorAll('.guide-hl').forEach(e => e.classList.remove('guide-hl')); true`);
   if (highlight) await ev(`(() => { const e = ${highlight}; if (e) e.classList.add('guide-hl'); return !!e; })()`);
@@ -67,7 +67,10 @@ async function shot(name, { highlight, area, pad = 16 }) {
 }
 
 const card = `document.querySelector('#terminal .rounded-2xl.border')`;
-const section = `document.querySelector('#terminal > div')`;
+const cardHead = `document.querySelector('#terminal .rounded-2xl.border > div')`;
+const chart = `document.querySelector('#terminal .px-5.pt-4')`;
+const offers = `document.querySelector('#terminal .px-5.pt-5')`;
+const crops = `document.querySelector('nav[aria-label="Культура"]')`;
 const clickText = (scope, text) => ev(`[...document.querySelectorAll('${scope} button')].find(b => b.textContent.trim().startsWith(${JSON.stringify(text)})).click(); true`);
 const fill = (values) =>
   ev(`(() => {
@@ -81,8 +84,8 @@ const fill = (values) =>
 
 await open("/");
 await ev(`document.getElementById('terminal').scrollIntoView(); true`);
-await shot("1-crops", { highlight: `document.querySelector('nav[aria-label="Культура"]')`, area: section });
-await shot("2-region", { highlight: `document.querySelector('#terminal [role=combobox]').closest('.flex.items-center.gap-2')`, area: card });
+await shot("1-crops", { highlight: crops, area: crops, pad: 20 });
+await shot("2-region", { highlight: `document.querySelector('#terminal [role=combobox]').closest('.flex.items-center.gap-2')`, area: cardHead, pad: 12 });
 
 // Карта: отметить три региона и применить — дальше график покажет три линии
 await clickText("#terminal", "На карте");
@@ -94,8 +97,8 @@ await sleep(1500);
 
 await clickText("#terminal", "Месяц");
 await sleep(1500);
-await shot("3-chart", { highlight: `document.querySelector('#terminal .px-5.pt-4')`, area: card });
-await shot("4-offers", { highlight: `document.querySelector('#terminal .px-5.pt-5')`, area: card });
+await shot("3-chart", { area: chart, pad: 8 });
+await shot("4-offers", { area: offers, pad: 8 });
 
 // Заявка на предложение
 await ev(`document.querySelector('#terminal table button').click(); true`);
@@ -118,7 +121,7 @@ await open("/predpriyatiyam/");
 await ev(`document.getElementById('bot').scrollIntoView(); true`);
 await clickText("#bot", "31500 200 8 1.5 46");
 await sleep(1800);
-await shot("8-bot", { area: `document.querySelector('#bot input').closest('.rounded-2xl')`, pad: 0 });
+await shot("8-bot", { area: `[...document.querySelectorAll('#bot div')].find((d) => d.className.includes('rounded-[44px]'))`, pad: 12 });
 
 ws.close();
 spawnSync("taskkill", ["/PID", String(proc.pid), "/T", "/F"]);

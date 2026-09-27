@@ -18,18 +18,6 @@ export interface CropSummary {
   index: number | null;
 }
 
-/** Заявка экспортёра: на предложение из сводки (offerId) или общий запрос */
-export interface LeadInput {
-  offerId?: string;
-  crop: CropId;
-  regions?: RegionId[];
-  volume?: number;
-  price?: number;
-  name: string;
-  company: string;
-  phone: string;
-  comment: string;
-}
 
 interface MarketValue {
   ready: boolean;
@@ -49,8 +37,6 @@ interface MarketValue {
   /** Объёмы по всем культурам — для первого экрана */
   summary: CropSummary[];
   lastEventAt: number;
-  /** Отправить заявку менеджеру. Возвращает текст ошибки или null */
-  submitLead: (input: LeadInput) => Promise<string | null>;
   /** Ответ из симулятора бота на сайте — всегда по льну */
   submitFromSimulator: (regionId: RegionId, offer: { price: number; volume: number } & QualityValues, moderation?: boolean) => Quote | null;
 }
@@ -225,25 +211,6 @@ export default function MarketProvider({ children }: { children: React.ReactNode
     };
   }, [mode, pushTo, loadLive]);
 
-  const submitLead = useCallback(
-    async (input: LeadInput): Promise<string | null> => {
-      if (input.name.trim().length < 2) return "Укажите имя.";
-      if (input.phone.replace(/\D/g, "").length < 10) return "Укажите телефон для связи.";
-      if (mode === "demo") {
-        await new Promise((r) => setTimeout(r, 400));
-        return null;
-      }
-      try {
-        const res = await fetch(`${API_URL}/api/leads`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
-        const data = await res.json().catch(() => ({}));
-        return res.ok ? null : (data.error ?? "Не удалось отправить заявку");
-      } catch {
-        return "Нет связи с сервером. Попробуйте ещё раз.";
-      }
-    },
-    [mode]
-  );
-
   const submitFromSimulator = useCallback(
     (regionId: RegionId, offer: { price: number; volume: number } & QualityValues, moderation = false): Quote | null => {
       const st = stores.current.get("flax");
@@ -277,10 +244,9 @@ export default function MarketProvider({ children }: { children: React.ReactNode
       now,
       summary,
       lastEventAt: active.lastEventAt,
-      submitLead,
       submitFromSimulator,
     }),
-    [ready, mode, connected, crop, setCrop, active, companyById, offers, now, summary, submitLead, submitFromSimulator]
+    [ready, mode, connected, crop, setCrop, active, companyById, offers, now, summary, submitFromSimulator]
   );
 
   return <MarketContext.Provider value={value}>{children}</MarketContext.Provider>;
