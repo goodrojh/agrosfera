@@ -55,9 +55,15 @@ async function open(path) {
 }
 
 /** Подсветить элемент и снять крупно только нужный участок (area) — чтобы текст на скриншоте читался без лупы */
-async function shot(name, { highlight, area, pad = 16 }) {
+/**
+ * Снять участок страницы. Кадр режется ровно по элементу (pad = 0), а скругление у снимаемого
+ * окна/карточки на время съёмки убираем — иначе в углах прямоугольного кадра остаётся тёмный фон.
+ * Скругление, тень и рамку кадру добавляет окно инструкции (GuideDialog).
+ */
+async function shot(name, { highlight, area, pad = 0, flat = false }) {
   await ev(`document.querySelectorAll('.guide-hl').forEach(e => e.classList.remove('guide-hl')); true`);
   if (highlight) await ev(`(() => { const e = ${highlight}; if (e) e.classList.add('guide-hl'); return !!e; })()`);
+  if (flat) await ev(`(() => { for (const e of [].concat(${area}).filter(Boolean)) { e.style.borderRadius = '0'; e.style.boxShadow = 'none'; } return true; })()`);
   await sleep(600);
   const r = await ev(`(() => {
     const list = [].concat(${area}).filter(Boolean).map((e) => e.getBoundingClientRect());
@@ -89,22 +95,22 @@ const fill = (values) =>
 
 await open("/");
 await ev(`document.getElementById('terminal').scrollIntoView(); true`);
-await shot("1-crops", { highlight: crops, area: crops, pad: 20 });
+await shot("1-crops", { highlight: crops, area: crops, pad: 14 });
 // Выбор регионов — с открытым списком, чтобы было видно, как отмечать
 await ev(`document.querySelector('#terminal [role=combobox]').parentElement.click(); true`);
 await sleep(700);
-await shot("2-region", { highlight: `document.querySelector('#terminal [role=combobox]').closest('.flex.items-center.gap-2')`, area: `[${cardHead}, document.querySelector('#terminal [role=listbox]')]`, pad: 12 });
+await shot("2-region", { highlight: `document.querySelector('#terminal [role=combobox]').closest('.flex.items-center.gap-2')`, area: `[${cardHead}, document.querySelector('#terminal [role=listbox]')]` });
 await clickText("#terminal", "Готово");
 await sleep(500);
 
 // Таблица — пока выбраны все регионы: много строк, кадр близок к пропорциям окна инструкции
-await shot("4-offers", { area: offers, pad: 8 });
+await shot("4-offers", { area: offers });
 
 // Карта: отметить три региона и применить — дальше график покажет три линии
 await clickText("#terminal", "На карте");
 await sleep(900);
 await ev(`(() => { for (const n of ['Омская обл.', 'Алтайский край', 'Саратовская обл.']) document.querySelector('path[aria-label="' + n + '"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); return true; })()`);
-await shot("5-map", { area: `document.querySelector('[aria-label="Выбор регионов на карте"] > div')`, pad: 0 });
+await shot("5-map", { area: `document.querySelector('[aria-label="Выбор регионов на карте"] > div')`, flat: true });
 await clickText('[aria-label="Выбор регионов на карте"]', "Применить");
 await sleep(1500);
 
@@ -112,14 +118,14 @@ await clickText("#terminal", "Месяц");
 // График для кадра повыше — линии регионов крупнее
 await ev(`(() => { const box = [...document.querySelectorAll('#terminal div')].find((d) => d.className.includes('md:h-[230px]')); if (box) box.style.height = '430px'; return !!box; })()`);
 await sleep(1800);
-await shot("3-chart", { area: chart, pad: 8 });
+await shot("3-chart", { area: chart });
 
 // Заявка на предложение
 await ev(`document.querySelector('#terminal table button').click(); true`);
 await sleep(900);
 await fill({ "Имя": "Алексей", "Телефон": "+7 900 123-45-67", "Компания": "ООО «Экспорт»" });
 await sleep(400);
-await shot("6-lead", { area: `document.querySelector('[role=dialog] > div')`, pad: 0 });
+await shot("6-lead", { area: `document.querySelector('[role=dialog] > div')`, flat: true });
 await ev(`document.querySelector('[role=dialog] [aria-label="Закрыть"]').click(); true`);
 await sleep(500);
 
@@ -128,14 +134,15 @@ await clickText("#terminal", "Оставить запрос");
 await sleep(900);
 await fill({ "Имя": "Алексей", "Телефон": "+7 900 123-45-67" });
 await sleep(400);
-await shot("7-request", { area: `document.querySelector('[role=dialog] > div')`, pad: 0 });
+await shot("7-request", { area: `document.querySelector('[role=dialog] > div')`, flat: true });
 
 // Предприятию: бот
 await open("/predpriyatiyam/");
 await ev(`document.getElementById('bot').scrollIntoView(); true`);
 await clickText("#bot", "31500 200 8 1.5 46");
 await sleep(1800);
-await shot("8-bot", { area: `[...document.querySelectorAll('#bot div')].find((d) => d.className.includes('rounded-[44px]'))`, pad: 12 });
+// Бот — только экран телефона, без чёрной рамки
+await shot("8-bot", { area: `[...document.querySelectorAll('#bot div')].find((d) => d.className.includes('rounded-[36px]'))`, flat: true });
 
 ws.close();
 spawnSync("taskkill", ["/PID", String(proc.pid), "/T", "/F"]);

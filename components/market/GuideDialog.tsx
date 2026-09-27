@@ -91,8 +91,14 @@ export default function GuideDialog({ onClose }: { onClose: () => void }) {
         </button>
 
         {/* Скриншот */}
-        <div className="relative flex-1 min-w-0 min-h-[46vh] lg:min-h-0 bg-[#eef2ea]">
-          <img key={step.image} src={asset(step.image)} alt={step.title} className="absolute inset-0 w-full h-full object-contain p-2 md:p-4 agr-fade" />
+        <div className="flex-1 min-w-0 min-h-0 h-[44vh] lg:h-auto flex items-center justify-center p-3 md:p-5 bg-[#eef2ea]">
+          {/* Скругление, тень и рамка — у самой картинки, поэтому углы чистые */}
+          <img
+            key={step.image}
+            src={asset(step.image)}
+            alt={step.title}
+            className="block max-w-full max-h-full w-auto h-auto rounded-xl bg-white shadow-[0_8px_30px_-12px_rgba(16,40,20,0.35)] ring-1 ring-black/5 agr-fade"
+          />
         </div>
 
         {/* Текст и управление */}
