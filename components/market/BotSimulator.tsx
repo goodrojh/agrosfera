@@ -6,7 +6,7 @@ import { SIM_COMPANY_ID, useMarket } from "@/components/market/MarketProvider";
 import { referenceInfo } from "@/lib/market/aggregate";
 import { formatHint, replyToButton, replyToText, type BotReply, type ButtonId, type Pending } from "@/lib/market/dialog";
 import { CROP_BY_ID } from "@/lib/market/crops";
-import { REGIONS, REGION_BY_ID, type RegionId } from "@/lib/market/regions";
+import { REGION_BY_ID, type RegionId } from "@/lib/market/regions";
 import { asset } from "@/lib/config";
 import type { Quote } from "@/lib/market/types";
 
@@ -24,7 +24,12 @@ interface Msg {
 }
 
 const NO_OFFERS: Quote[] = [];
-const EXAMPLES = ["31500 200 8 1.5 46", "31500 200", "30 150 8 1,5 46", "31500 200 46 1.5 8"];
+/** Регион склада в демонстрации — для ответа бота «(Омская обл.)» и сравнения с рынком */
+const REGION: RegionId = "omsk";
+
+/** Отправить строку в симулятор из соседнего блока (примеры на странице) */
+export const BOT_SEND_EVENT = "agr-bot-send";
+export const sendToBot = (text: string) => window.dispatchEvent(new CustomEvent(BOT_SEND_EVENT, { detail: text }));
 const clock = () => new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 
 /** Фон чата как в Telegram: светлая «обоина» с узором */
@@ -40,7 +45,7 @@ export default function BotSimulator() {
   const { offers: marketOffers, crop, submitFromSimulator, mode } = useMarket();
   // Бот принимает предложения по льну — сравниваем только с рынком льна
   const offers = crop === "flax" ? marketOffers : NO_OFFERS;
-  const [region, setRegion] = useState<RegionId>("omsk");
+  const region = REGION;
   const [msgs, setMsgs] = useState<Msg[]>([{ id: 0, from: "bot", text: GREETING, time: "08:00" }]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
@@ -51,6 +56,13 @@ export default function BotSimulator() {
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [msgs, typing]);
+
+  const sendRef = useRef<(t: string) => void>(() => {});
+  useEffect(() => {
+    const onSend = (e: Event) => sendRef.current((e as CustomEvent<string>).detail);
+    window.addEventListener(BOT_SEND_EVENT, onSend);
+    return () => window.removeEventListener(BOT_SEND_EVENT, onSend);
+  }, []);
 
   const ctx = () => {
     const ref = referenceInfo(offers, region, SIM_COMPANY_ID);
@@ -84,6 +96,9 @@ export default function BotSimulator() {
     setInput("");
     botSay(replyToText(t, ctx()));
   };
+  useEffect(() => {
+    sendRef.current = send;
+  });
 
   const press = (msgId: number, id: ButtonId, label: string) => {
     if (typing) return;
@@ -92,22 +107,7 @@ export default function BotSimulator() {
   };
 
   return (
-    <div className="flex flex-col items-center gap-4">
-      <label className="flex items-center gap-2 text-sm text-gray-600">
-        Регион вашего склада
-        <select
-          value={region}
-          onChange={(e) => setRegion(e.target.value as RegionId)}
-          className="text-sm bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#1F5A25]/20"
-        >
-          {REGIONS.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.name}
-            </option>
-          ))}
-        </select>
-      </label>
-
+    <div className="flex flex-col items-center gap-3">
       {/* Телефон */}
       <div className="w-full max-w-[380px] rounded-[44px] bg-[#111] p-[10px] shadow-[0_30px_70px_-25px_rgba(0,0,0,0.55)]">
         <div className="relative h-[640px] rounded-[36px] overflow-hidden flex flex-col bg-white">
@@ -183,24 +183,9 @@ export default function BotSimulator() {
         </div>
       </div>
 
-      {/* Быстрые примеры */}
-      <div className="w-full max-w-[380px]">
-        <p className="text-xs text-gray-500 text-center">Попробуйте отправить:</p>
-        <div className="mt-2 flex flex-wrap justify-center gap-1.5">
-          {EXAMPLES.map((e) => (
-            <button
-              key={e}
-              onClick={() => send(e)}
-              className="text-xs font-mono rounded-lg border border-gray-200 bg-white px-2 py-1 text-gray-700 hover:border-[#1F5A25]/40 hover:text-[#1F5A25] transition-colors"
-            >
-              {e}
-            </button>
-          ))}
-        </div>
-        <p className="mt-3 text-[11px] text-gray-400 text-center">
-          {mode === "demo" ? "Симулятор отвечает так же, как настоящий бот. Принятое предложение появляется в сводке." : "Симулятор для знакомства: данные не отправляются в бот."}
-        </p>
-      </div>
+      <p className="text-[11px] text-gray-400 text-center max-w-[380px]">
+        {mode === "demo" ? "Симулятор отвечает так же, как настоящий бот. Принятое предложение появляется в сводке." : "Симулятор для знакомства: данные не отправляются в бот."}
+      </p>
     </div>
   );
 }
