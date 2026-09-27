@@ -55,7 +55,7 @@ const STEPS: Step[] = [
   },
 ];
 
-/** Пошаговая инструкция к терминалу со скриншотами */
+/** Пошаговая инструкция к сводке со скриншотами */
 export default function GuideDialog({ onClose }: { onClose: () => void }) {
   const [i, setI] = useState(0);
   const step = STEPS[i];
@@ -79,12 +79,13 @@ export default function GuideDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 md:p-6 bg-black/50" onClick={onClose} role="dialog" aria-modal="true" aria-label="Инструкция">
-      <div className="w-full max-w-6xl max-h-full overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+      {/* Окно всегда помещается в экран: скриншот ужимается под свободную высоту, текст под ним виден без прокрутки */}
+      <div className="w-full max-w-6xl h-full max-h-[860px] overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-4 px-5 md:px-6 py-4 border-b border-gray-100">
           <div>
-            <p className="text-lg font-semibold text-gray-900">Как пользоваться котировками</p>
+            <p className="text-lg font-semibold text-gray-900">Как пользоваться сводкой</p>
             <p className="text-sm text-gray-500">
-              Шаг {i + 1} из {STEPS.length} · листайте стрелками
+              Шаг {i + 1} из {STEPS.length}
             </p>
           </div>
           <button onClick={onClose} aria-label="Закрыть" className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100">
@@ -92,9 +93,9 @@ export default function GuideDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div className="grid lg:grid-cols-[230px_1fr] min-h-0 flex-1 overflow-y-auto">
+        <div className="grid lg:grid-cols-[230px_1fr] min-h-0 flex-1">
           {/* Список шагов */}
-          <ol className="hidden lg:block border-r border-gray-100 p-3 space-y-1">
+          <ol className="hidden lg:block border-r border-gray-100 p-3 space-y-1 overflow-y-auto">
             {STEPS.map((s, n) => (
               <li key={s.title}>
                 <button
@@ -118,16 +119,16 @@ export default function GuideDialog({ onClose }: { onClose: () => void }) {
           </ol>
 
           {/* Шаг */}
-          <div className="p-4 md:p-6 flex flex-col gap-5 min-w-0">
-            <div className="rounded-xl bg-[#f5f7f2] border border-gray-100 flex items-center justify-center p-3 md:p-4 min-h-[220px]">
-              <img key={step.image} src={asset(step.image)} alt={step.title} className="max-h-[52vh] w-auto max-w-full rounded-lg shadow-sm agr-fade" />
+          <div className="p-4 md:p-6 flex flex-col gap-4 md:gap-5 min-w-0 min-h-0">
+            <div className="relative flex-1 min-h-[140px] rounded-xl bg-[#f5f7f2] border border-gray-100">
+              <img key={step.image} src={asset(step.image)} alt={step.title} className="absolute inset-0 w-full h-full object-contain p-3 md:p-4 agr-fade" />
             </div>
-            <div>
-              <p className="text-xl font-semibold text-gray-900">
+            <div className="shrink-0">
+              <p className="text-lg md:text-xl font-semibold text-gray-900">
                 <span className="text-[#1F5A25] mr-2">{i + 1}.</span>
                 {step.title}
               </p>
-              <p className="mt-2 text-gray-600 leading-relaxed max-w-3xl">{step.text}</p>
+              <p className="mt-1.5 text-[15px] md:text-base text-gray-600 leading-relaxed max-w-3xl">{step.text}</p>
               {step.link && (
                 <a href={asset(step.link.href)} className="mt-3 inline-block text-sm font-semibold text-[#1F5A25] underline underline-offset-2">
                   {step.link.label} →
