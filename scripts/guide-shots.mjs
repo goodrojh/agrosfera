@@ -39,7 +39,7 @@ ws.onmessage = (m) => {
 const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
 const ev = async (expr) => (await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true })).result?.value;
 
-await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 2, mobile: false });
+await send("Emulation.setDeviceMetricsOverride", { width: 1180, height: 900, deviceScaleFactor: 2, mobile: false });
 await send("Page.enable");
 
 async function open(path) {
@@ -59,7 +59,12 @@ async function shot(name, { highlight, area, pad = 16 }) {
   await ev(`document.querySelectorAll('.guide-hl').forEach(e => e.classList.remove('guide-hl')); true`);
   if (highlight) await ev(`(() => { const e = ${highlight}; if (e) e.classList.add('guide-hl'); return !!e; })()`);
   await sleep(600);
-  const r = await ev(`(() => { const e = ${area}; const b = e.getBoundingClientRect(); return { x: b.left + scrollX, y: b.top + scrollY, w: b.width, h: b.height }; })()`);
+  const r = await ev(`(() => {
+    const list = [].concat(${area}).filter(Boolean).map((e) => e.getBoundingClientRect());
+    const x = Math.min(...list.map((b) => b.left)), y = Math.min(...list.map((b) => b.top));
+    const w = Math.max(...list.map((b) => b.right)) - x, h = Math.max(...list.map((b) => b.bottom)) - y;
+    return { x: x + scrollX, y: y + scrollY, w, h };
+  })()`);
   const clip = { x: Math.max(0, r.x - pad), y: Math.max(0, r.y - pad), width: r.w + pad * 2, height: r.h + pad * 2, scale: 1 };
   const res = await send("Page.captureScreenshot", { format: "webp", quality: 88, clip, captureBeyondViewport: true });
   writeFileSync(new URL(`${name}.webp`, outDir), Buffer.from(res.data, "base64"));
@@ -85,7 +90,15 @@ const fill = (values) =>
 await open("/");
 await ev(`document.getElementById('terminal').scrollIntoView(); true`);
 await shot("1-crops", { highlight: crops, area: crops, pad: 20 });
-await shot("2-region", { highlight: `document.querySelector('#terminal [role=combobox]').closest('.flex.items-center.gap-2')`, area: cardHead, pad: 12 });
+// Выбор регионов — с открытым списком, чтобы было видно, как отмечать
+await ev(`document.querySelector('#terminal [role=combobox]').parentElement.click(); true`);
+await sleep(700);
+await shot("2-region", { highlight: `document.querySelector('#terminal [role=combobox]').closest('.flex.items-center.gap-2')`, area: `[${cardHead}, document.querySelector('#terminal [role=listbox]')]`, pad: 12 });
+await clickText("#terminal", "Готово");
+await sleep(500);
+
+// Таблица — пока выбраны все регионы: много строк, кадр близок к пропорциям окна инструкции
+await shot("4-offers", { area: offers, pad: 8 });
 
 // Карта: отметить три региона и применить — дальше график покажет три линии
 await clickText("#terminal", "На карте");
@@ -96,9 +109,10 @@ await clickText('[aria-label="Выбор регионов на карте"]', "�
 await sleep(1500);
 
 await clickText("#terminal", "Месяц");
-await sleep(1500);
+// График для кадра повыше — линии регионов крупнее
+await ev(`(() => { const box = [...document.querySelectorAll('#terminal div')].find((d) => d.className.includes('md:h-[230px]')); if (box) box.style.height = '430px'; return !!box; })()`);
+await sleep(1800);
 await shot("3-chart", { area: chart, pad: 8 });
-await shot("4-offers", { area: offers, pad: 8 });
 
 // Заявка на предложение
 await ev(`document.querySelector('#terminal table button').click(); true`);

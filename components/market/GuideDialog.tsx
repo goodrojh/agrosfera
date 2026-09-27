@@ -81,91 +81,78 @@ export default function GuideDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 md:p-6 bg-black/50" onClick={onClose} role="dialog" aria-modal="true" aria-label="Инструкция">
-      {/* Окно всегда помещается в экран: скриншот ужимается под свободную высоту, текст под ним виден без прокрутки */}
-      <div className="w-full max-w-6xl h-full max-h-[860px] overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between gap-4 px-5 md:px-6 py-4 border-b border-gray-100">
-          <div>
-            <p className="text-lg font-semibold text-gray-900">Как пользоваться сводкой</p>
-            <p className="text-sm text-gray-500">
-              Шаг {i + 1} из {STEPS.length}
-            </p>
-          </div>
-          <button onClick={onClose} aria-label="Закрыть" className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100">
-            <X size={18} />
-          </button>
+      {/* Скриншот слева во всю высоту окна, текст и управление — справа. Окно заканчивается там, где заканчивается содержимое */}
+      <div
+        className="relative w-full max-w-[1280px] max-h-full overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col lg:flex-row lg:h-[min(84vh,720px)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button onClick={onClose} aria-label="Закрыть" className="absolute right-3 top-3 z-10 w-9 h-9 rounded-full flex items-center justify-center text-gray-500 bg-white/90 hover:bg-gray-100">
+          <X size={18} />
+        </button>
+
+        {/* Скриншот */}
+        <div className="relative flex-1 min-w-0 min-h-[46vh] lg:min-h-0 bg-[#eef2ea]">
+          <img key={step.image} src={asset(step.image)} alt={step.title} className="absolute inset-0 w-full h-full object-contain p-2 md:p-4 agr-fade" />
         </div>
 
-        <div className="grid lg:grid-cols-[230px_1fr] min-h-0 flex-1">
-          {/* Список шагов */}
-          <ol className="hidden lg:block border-r border-gray-100 p-3 space-y-1 overflow-y-auto">
+        {/* Текст и управление */}
+        <div className="lg:w-[320px] shrink-0 flex flex-col p-5 md:p-6 lg:border-l border-gray-100">
+          <p className="text-sm text-gray-500 pr-10">
+            Как пользоваться сводкой · шаг {i + 1} из {STEPS.length}
+          </p>
+          <p className="mt-3 text-xl md:text-2xl font-semibold text-gray-900 leading-snug">
+            <span className="text-[#1F5A25] mr-2">{i + 1}.</span>
+            {step.title}
+          </p>
+          <p className="mt-3 text-[15px] md:text-base text-gray-600 leading-relaxed">{step.text}</p>
+          {step.action && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                step.action!.run();
+              }}
+              className="mt-4 self-start text-sm font-semibold text-[#1F5A25] underline underline-offset-2"
+            >
+              {step.action.label} →
+            </button>
+          )}
+
+          {/* Все шаги — можно перейти к любому */}
+          <ol className="hidden lg:block mt-6 space-y-0.5 overflow-y-auto min-h-0">
             {STEPS.map((s, n) => (
               <li key={s.title}>
                 <button
                   onClick={() => setI(n)}
-                  className={
-                    "w-full text-left flex gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors " +
-                    (n === i ? "bg-[#f3f8ee] text-[#1F5A25] font-semibold" : "text-gray-600 hover:bg-gray-50")
-                  }
+                  className={"w-full text-left flex gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] transition-colors " + (n === i ? "bg-[#f3f8ee] text-[#1F5A25] font-semibold" : "text-gray-500 hover:bg-gray-50")}
                 >
-                  <span
-                    className={
-                      "shrink-0 w-5 h-5 rounded-full text-[11px] flex items-center justify-center " + (n === i ? "bg-[#1F5A25] text-white" : "bg-gray-100 text-gray-500")
-                    }
-                  >
-                    {n + 1}
-                  </span>
+                  <span className={"shrink-0 w-5 h-5 rounded-full text-[11px] flex items-center justify-center " + (n === i ? "bg-[#1F5A25] text-white" : "bg-gray-100 text-gray-500")}>{n + 1}</span>
                   {s.title}
                 </button>
               </li>
             ))}
           </ol>
 
-          {/* Шаг */}
-          <div className="p-4 md:p-6 flex flex-col gap-4 md:gap-5 min-w-0 min-h-0">
-            <div className="relative flex-1 min-h-[140px] rounded-xl bg-[#f5f7f2] border border-gray-100">
-              <img key={step.image} src={asset(step.image)} alt={step.title} className="absolute inset-0 w-full h-full object-contain p-3 md:p-4 agr-fade" />
+          <div className="mt-6 lg:mt-auto pt-4 flex items-center justify-between gap-3">
+            <button
+              onClick={() => go(-1)}
+              disabled={i === 0}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+            >
+              <ArrowLeft size={16} /> Назад
+            </button>
+            <div className="flex gap-1.5 lg:hidden" aria-hidden>
+              {STEPS.map((_, n) => (
+                <span key={n} className={"h-1.5 rounded-full transition-all " + (n === i ? "w-4 bg-[#1F5A25]" : "w-1.5 bg-gray-300")} />
+              ))}
             </div>
-            <div className="shrink-0">
-              <p className="text-lg md:text-xl font-semibold text-gray-900">
-                <span className="text-[#1F5A25] mr-2">{i + 1}.</span>
-                {step.title}
-              </p>
-              <p className="mt-1.5 text-[15px] md:text-base text-gray-600 leading-relaxed max-w-3xl">{step.text}</p>
-              {step.action && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    step.action!.run();
-                  }}
-                  className="mt-3 inline-block text-sm font-semibold text-[#1F5A25] underline underline-offset-2"
-                >
-                  {step.action.label} →
-                </button>
-              )}
-            </div>
+            <button
+              onClick={() => (last ? onClose() : go(1))}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#1F5A25] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[#174a1c]"
+            >
+              {last ? "Понятно" : "Далее"} {!last && <ArrowRight size={16} />}
+            </button>
           </div>
-        </div>
-
-        <div className="flex items-center justify-between gap-3 px-5 md:px-6 py-3.5 border-t border-gray-100">
-          <button
-            onClick={() => go(-1)}
-            disabled={i === 0}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
-          >
-            <ArrowLeft size={16} /> Назад
-          </button>
-          <div className="flex gap-1.5" aria-hidden>
-            {STEPS.map((_, n) => (
-              <span key={n} className={"h-1.5 rounded-full transition-all " + (n === i ? "w-5 bg-[#1F5A25]" : "w-1.5 bg-gray-300")} />
-            ))}
-          </div>
-          <button
-            onClick={() => (last ? onClose() : go(1))}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-[#1F5A25] text-white px-4 py-2.5 text-sm font-semibold hover:bg-[#174a1c]"
-          >
-            {last ? "Понятно" : "Далее"} {!last && <ArrowRight size={16} />}
-          </button>
         </div>
       </div>
     </div>

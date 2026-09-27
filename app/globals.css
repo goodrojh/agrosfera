@@ -21,6 +21,19 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Ползунки прокрутки на сайте скрыты: прокрутка колесом, тачпадом и пальцем работает как обычно */
+html,
+body,
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  display: none;
+}
+
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
